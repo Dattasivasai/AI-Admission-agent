@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import json
+from langchain_core.messages import HumanMessage, AIMessage
+from fastapi.responses import JSONResponse
 import traceback
 
 # Import the agent from agent.py
@@ -33,22 +35,48 @@ import traceback
 @app.post("/chat")
 async def chat(query: Query):
     try:
-        input_data = {
-            "messages": query.history
-            + [{"role": "user", "content": query.message}]
-        }
+        converted_messages = []
 
-        result = await agent_graph.ainvoke(input_data)
+        for message in query.history:
+            role = message.get("role")
+            content = message.get("content", "")
+
+            if role == "user":
+                converted_messages.append(
+                    HumanMessage(content=content)
+                )
+
+            elif role in ("agent", "assistant"):
+                converted_messages.append(
+                    AIMessage(content=content)
+                )
+
+        # Add the current message only once
+        converted_messages.append(
+            HumanMessage(content=query.message)
+        )
+
+        result = await agent_graph.ainvoke({
+            "messages": converted_messages
+        })
 
         messages = result.get("messages", [])
 
         if not messages:
-            return {"response": "No response was generated."}
+            return {
+                "response": "No response was generated."
+            }
 
         final_message = messages[-1]
-        content = getattr(final_message, "content", str(final_message))
+        content = getattr(
+            final_message,
+            "content",
+            str(final_message),
+        )
 
-        return {"response": content}
+        return {
+            "response": content
+        }
 
     except Exception as e:
         print("CHAT ERROR:", repr(e))
