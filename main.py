@@ -1,20 +1,19 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import sys
 import os
+import json
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from agent import app as agent_graph  # Import your LangGraph app
+# Import the agent from agent.py
+from agent import app as agent_graph
 
 app = FastAPI(title="JEE Admission Agent API")
 
-# CORS for React frontend
+# CORS - Allows both local and deployed frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],          # We'll restrict this later for security
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,6 +21,7 @@ app.add_middleware(
 
 class Query(BaseModel):
     message: str
+    history: list = []   # For conversation history
 
 @app.get("/")
 async def home():
@@ -30,10 +30,22 @@ async def home():
 @app.post("/chat")
 async def chat(query: Query):
     try:
-        result = agent_graph.invoke({
-            "messages": [{"role": "user", "content": query.message}]
-        })
-        return {"response": result["messages"][-1].content}
+        input_data = {
+            "messages": query.history + [{"role": "user", "content": query.message}]
+        }
+
+        async def stream_response():
+            try:
+                async for chunk in agent_graph.astream(input_data):
+                    if "messages" in chunk and chunk["messages"]:
+                        content = chunk["messages"][-1].content
+                        if content:
+                            yield f"data: {json.dumps({'content': content})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+        return StreamingResponse(stream_response(), media_type="text/event-stream")
+
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
 
