@@ -31,23 +31,27 @@ async def home():
 async def chat(query: Query):
     try:
         input_data = {
-            "messages": query.history + [{"role": "user", "content": query.message}]
+            "messages": query.history
+            + [{"role": "user", "content": query.message}]
         }
 
-        async def stream_response():
-            try:
-                async for chunk in agent_graph.astream(input_data):
-                    if "messages" in chunk and chunk["messages"]:
-                        content = chunk["messages"][-1].content
-                        if content:
-                            yield f"data: {json.dumps({'content': content})}\n\n"
-            except Exception as e:
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        result = await agent_graph.ainvoke(input_data)
 
-        return StreamingResponse(stream_response(), media_type="text/event-stream")
+        messages = result.get("messages", [])
+
+        if not messages:
+            return {"response": "No response was generated."}
+
+        final_message = messages[-1]
+        content = getattr(final_message, "content", str(final_message))
+
+        return {"response": content}
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"detail": str(e)})
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e)},
+        )
 
 if __name__ == "__main__":
     import uvicorn
