@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import json
+import traceback
 
 # Import the agent from agent.py
 from agent import app as agent_graph
@@ -27,6 +28,8 @@ class Query(BaseModel):
 async def home():
     return {"message": "JEE Admission Agent Backend is running!"}
 
+import traceback
+
 @app.post("/chat")
 async def chat(query: Query):
     try:
@@ -48,6 +51,9 @@ async def chat(query: Query):
         return {"response": content}
 
     except Exception as e:
+        print("CHAT ERROR:", repr(e))
+        traceback.print_exc()
+
         return JSONResponse(
             status_code=500,
             content={"detail": str(e)},
