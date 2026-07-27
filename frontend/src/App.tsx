@@ -66,26 +66,28 @@ function App() {
 
   useEffect(() => {
     try {
-      const savedTheme = localStorage.getItem('theme') as Theme | null;
-      const savedChats = localStorage.getItem('jeeChats');
-
-      if (savedTheme === 'dark' || savedTheme === 'light') {
+      const savedTheme = localStorage.getItem("theme") as Theme | null;
+      const savedChats = localStorage.getItem("jeeChats");
+  
+      if (savedTheme === "dark" || savedTheme === "light") {
         setTheme(savedTheme);
       }
-
+  
       if (savedChats) {
         const parsedChats = JSON.parse(savedChats) as Chat[];
-
+  
         if (Array.isArray(parsedChats)) {
+          // Load previous chats into the sidebar
           setChats(parsedChats);
-
-          if (parsedChats.length > 0) {
-            setCurrentChatId(parsedChats[0].id);
-          }
+  
+          // IMPORTANT:
+          // Do NOT automatically open the last/first conversation.
+          // Show the welcome page instead.
+          setCurrentChatId(null);
         }
       }
     } catch (error) {
-      console.error('Failed to load saved data:', error);
+      console.error("Failed to load saved data:", error);
     }
   }, []);
 
