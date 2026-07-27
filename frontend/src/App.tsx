@@ -32,6 +32,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [theme, setTheme] = useState<Theme>('dark');
+  const [hoveredChatId, setHoveredChatId] = useState<string | null>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -150,7 +151,7 @@ function App() {
     inputRef.current?.focus();
   };
 
-  // ====================== STREAMING SEND MESSAGE ======================
+  // ====================== IMPROVED STREAMING ======================
   const sendMessage = async () => {
     const currentInput = input.trim();
     if (!currentInput || isLoading) return;
@@ -159,11 +160,12 @@ function App() {
     setIsLoading(true);
 
     const userMessage: Message = { role: 'user', content: currentInput };
+    const thinkingMessage: Message = { role: 'agent', content: 'Thinking...' };
 
     let chatIdToUse = currentChatId;
     let previousMessages: Message[] = [];
 
-    // Create new chat if needed
+    // ========== Create or update chat in ONE state update ==========
     if (!chatIdToUse) {
       const newChat = createNewChat();
       chatIdToUse = newChat.id;
@@ -172,7 +174,7 @@ function App() {
         {
           ...newChat,
           title: generateTitle(currentInput),
-          messages: [userMessage],
+          messages: [userMessage, thinkingMessage],
         },
         ...prev,
       ]);
@@ -190,27 +192,12 @@ function App() {
                   chat.messages.length === 0
                     ? generateTitle(currentInput)
                     : chat.title,
-                messages: [...chat.messages, userMessage],
+                messages: [...chat.messages, userMessage, thinkingMessage],
               }
             : chat,
         ),
       );
     }
-
-    // Temporary "Thinking..." message
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatIdToUse
-          ? {
-              ...chat,
-              messages: [
-                ...chat.messages,
-                { role: 'agent', content: 'Thinking...' },
-              ],
-            }
-          : chat,
-      ),
-    );
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -232,62 +219,68 @@ function App() {
       if (!reader) throw new Error('No response body');
 
       const decoder = new TextDecoder();
+      let buffer = '';
       let fullContent = '';
-      let firstTokenReceived = false;
       let lastUpdate = 0;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        buffer += decoder.decode(value, { stream: true });
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
+        // Proper SSE buffering
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
 
-          try {
-            const data = JSON.parse(line.slice(6));
+        for (const event of events) {
+          const lines = event.split('\n');
 
-            if (data.type === 'token') {
-              fullContent += data.content;
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
 
-              const now = Date.now();
-              // Throttle updates (~40ms) for better performance
-              if (!firstTokenReceived || now - lastUpdate > 40) {
-                firstTokenReceived = true;
-                lastUpdate = now;
+            try {
+              const data = JSON.parse(line.slice(6));
 
-                setChats((prev) =>
-                  prev.map((chat) => {
-                    if (chat.id !== chatIdToUse) return chat;
+              if (data.type === 'token') {
+                fullContent += data.content;
 
-                    const msgs = [...chat.messages];
-                    const lastIdx = msgs.length - 1;
+                const now = Date.now();
+                // Update every ~80ms
+                if (now - lastUpdate > 80 || fullContent.length < 20) {
+                  lastUpdate = now;
 
-                    if (msgs[lastIdx]?.role === 'agent') {
-                      msgs[lastIdx] = {
-                        role: 'agent',
-                        content: fullContent,
-                      };
-                    }
+                  setChats((prev) =>
+                    prev.map((chat) => {
+                      if (chat.id !== chatIdToUse) return chat;
 
-                    return { ...chat, messages: msgs };
-                  }),
-                );
+                      const msgs = [...chat.messages];
+                      const lastIdx = msgs.length - 1;
+
+                      if (msgs[lastIdx]?.role === 'agent') {
+                        msgs[lastIdx] = {
+                          role: 'agent',
+                          content: fullContent,
+                        };
+                      }
+
+                      return { ...chat, messages: msgs };
+                    }),
+                  );
+                }
               }
-            }
 
-            if (data.type === 'error') {
-              throw new Error(data.content);
+              if (data.type === 'error') {
+                throw new Error(data.content);
+              }
+            } catch (err) {
+              console.error('SSE parse error:', err, line);
             }
-          } catch {
-            // ignore incomplete JSON
           }
         }
       }
 
-      // Final update
+      // Final update to ensure last tokens are shown
       if (fullContent) {
         setChats((prev) =>
           prev.map((chat) => {
@@ -439,10 +432,13 @@ function App() {
           ) : (
             chats.map((chat) => {
               const isActive = chat.id === currentChatId;
+              const isHovered = hoveredChatId === chat.id;
 
               return (
                 <div
                   key={chat.id}
+                  onMouseEnter={() => setHoveredChatId(chat.id)}
+                  onMouseLeave={() => setHoveredChatId(null)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -500,19 +496,18 @@ function App() {
                       display: 'grid',
                       placeItems: 'center',
                       flexShrink: 0,
-                      opacity: 0.7,
+                      opacity: isHovered || isActive ? 0.85 : 0,
+                      transition: 'opacity 0.15s ease',
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = isDark
                         ? 'rgba(239, 68, 68, 0.18)'
                         : 'rgba(239, 68, 68, 0.12)';
                       e.currentTarget.style.color = '#ef4444';
-                      e.currentTarget.style.opacity = '1';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.background = 'transparent';
                       e.currentTarget.style.color = colors.textMuted;
-                      e.currentTarget.style.opacity = '0.7';
                     }}
                   >
                     🗑
@@ -534,7 +529,6 @@ function App() {
           background: colors.mainBackground,
         }}
       >
-        {/* Header */}
         <header
           style={{
             height: '64px',
@@ -615,7 +609,6 @@ function App() {
           </div>
         </header>
 
-        {/* Chat content */}
         <div
           ref={chatContainerRef}
           style={{
@@ -749,7 +742,7 @@ function App() {
             >
               {currentChat?.messages.map((message, index) => {
                 const isUser = message.role === 'user';
-                const isLastMessage = index === (currentChat?.messages.length ?? 0) - 1;
+                const isLast = index === (currentChat?.messages.length ?? 0) - 1;
 
                 return (
                   <div
@@ -811,8 +804,7 @@ function App() {
                       >
                         {message.content}
 
-                        {/* Blinking cursor while streaming */}
-                        {isLoading && isLastMessage && message.role === 'agent' && (
+                        {isLoading && isLast && message.role === 'agent' && (
                           <span
                             style={{
                               display: 'inline-block',
