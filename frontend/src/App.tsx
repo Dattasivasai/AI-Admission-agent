@@ -60,7 +60,7 @@ function App() {
     agentMessage: isDark ? '#18181b' : '#ffffff',
   };
 
-  // Load theme + chats, but always start on welcome screen
+  // Load saved data → always start on welcome screen
   useEffect(() => {
     try {
       const savedTheme = localStorage.getItem('theme') as Theme | null;
@@ -71,13 +71,12 @@ function App() {
       }
 
       if (savedChats) {
-        const parsedChats = JSON.parse(savedChats) as Chat[];
-        if (Array.isArray(parsedChats)) {
-          setChats(parsedChats);
+        const parsed = JSON.parse(savedChats) as Chat[];
+        if (Array.isArray(parsed)) {
+          setChats(parsed);
         }
       }
 
-      // Always show welcome page on load
       setCurrentChatId(null);
     } catch (error) {
       console.error('Failed to load saved data:', error);
@@ -108,21 +107,16 @@ function App() {
   }, [currentChatId]);
 
   const toggleTheme = () => {
-    setTheme((previousTheme) =>
-      previousTheme === 'dark' ? 'light' : 'dark',
-    );
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  const generateChatId = () => {
-    return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  };
+  const generateChatId = () =>
+    `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const generateTitle = (message: string) => {
-    const cleanedMessage = message.trim();
-    if (!cleanedMessage) return 'New Conversation';
-    return cleanedMessage.length > 38
-      ? `${cleanedMessage.slice(0, 38)}...`
-      : cleanedMessage;
+    const cleaned = message.trim();
+    if (!cleaned) return 'New Conversation';
+    return cleaned.length > 38 ? `${cleaned.slice(0, 38)}...` : cleaned;
   };
 
   const createNewChat = (): Chat => ({
@@ -131,24 +125,23 @@ function App() {
     messages: [],
   });
 
+  // ChatGPT-style New Chat
   const startNewChat = () => {
-    const newChat = createNewChat();
-    setChats((previousChats) => [newChat, ...previousChats]);
-    setCurrentChatId(newChat.id);
+    setCurrentChatId(null);
     setInput('');
+    inputRef.current?.focus();
   };
 
-  // Delete a chat
+  // Delete chat → open next available
   const deleteChat = (chatId: string) => {
-    setChats((previousChats) => {
-      const updatedChats = previousChats.filter((chat) => chat.id !== chatId);
+    setChats((prev) => {
+      const updated = prev.filter((c) => c.id !== chatId);
 
       if (chatId === currentChatId) {
-        // If we deleted the open chat → go back to welcome screen
-        setCurrentChatId(null);
+        setCurrentChatId(updated.length > 0 ? updated[0].id : null);
       }
 
-      return updatedChats;
+      return updated;
     });
   };
 
@@ -157,6 +150,7 @@ function App() {
     inputRef.current?.focus();
   };
 
+  // ====================== STREAMING SEND MESSAGE ======================
   const sendMessage = async () => {
     const currentInput = input.trim();
     if (!currentInput || isLoading) return;
@@ -164,48 +158,61 @@ function App() {
     setInput('');
     setIsLoading(true);
 
-    const userMessage: Message = {
-      role: 'user',
-      content: currentInput,
-    };
+    const userMessage: Message = { role: 'user', content: currentInput };
 
     let chatIdToUse = currentChatId;
     let previousMessages: Message[] = [];
 
+    // Create new chat if needed
     if (!chatIdToUse) {
       const newChat = createNewChat();
       chatIdToUse = newChat.id;
 
-      setChats((previousChats) => [
+      setChats((prev) => [
         {
           ...newChat,
           title: generateTitle(currentInput),
           messages: [userMessage],
         },
-        ...previousChats,
+        ...prev,
       ]);
       setCurrentChatId(newChat.id);
     } else {
-      const selectedChat = chats.find((chat) => chat.id === chatIdToUse);
-      previousMessages = selectedChat?.messages ?? [];
+      const selected = chats.find((c) => c.id === chatIdToUse);
+      previousMessages = selected?.messages ?? [];
 
-      setChats((previousChats) =>
-        previousChats.map((chat) => {
-          if (chat.id !== chatIdToUse) return chat;
-          return {
-            ...chat,
-            title:
-              chat.messages.length === 0
-                ? generateTitle(currentInput)
-                : chat.title,
-            messages: [...chat.messages, userMessage],
-          };
-        }),
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === chatIdToUse
+            ? {
+                ...chat,
+                title:
+                  chat.messages.length === 0
+                    ? generateTitle(currentInput)
+                    : chat.title,
+                messages: [...chat.messages, userMessage],
+              }
+            : chat,
+        ),
       );
     }
 
+    // Temporary "Thinking..." message
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === chatIdToUse
+          ? {
+              ...chat,
+              messages: [
+                ...chat.messages,
+                { role: 'agent', content: 'Thinking...' },
+              ],
+            }
+          : chat,
+      ),
+    );
+
     try {
-      const history = [...previousMessages, userMessage];
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
       const response = await fetch(`${API_URL}/chat`, {
@@ -213,7 +220,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: currentInput,
-          history,
+          history: previousMessages,
         }),
       });
 
@@ -221,46 +228,112 @@ function App() {
         throw new Error(`Request failed with status ${response.status}`);
       }
 
-      const data = await response.json();
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
 
-      const agentMessage: Message = {
-        role: 'agent',
-        content:
-          typeof data.response === 'string'
-            ? data.response
-            : 'I could not generate a valid response.',
-      };
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let firstTokenReceived = false;
+      let lastUpdate = 0;
 
-      setChats((previousChats) =>
-        previousChats.map((chat) =>
-          chat.id === chatIdToUse
-            ? { ...chat, messages: [...chat.messages, agentMessage] }
-            : chat,
-        ),
-      );
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.type === 'token') {
+              fullContent += data.content;
+
+              const now = Date.now();
+              // Throttle updates (~40ms) for better performance
+              if (!firstTokenReceived || now - lastUpdate > 40) {
+                firstTokenReceived = true;
+                lastUpdate = now;
+
+                setChats((prev) =>
+                  prev.map((chat) => {
+                    if (chat.id !== chatIdToUse) return chat;
+
+                    const msgs = [...chat.messages];
+                    const lastIdx = msgs.length - 1;
+
+                    if (msgs[lastIdx]?.role === 'agent') {
+                      msgs[lastIdx] = {
+                        role: 'agent',
+                        content: fullContent,
+                      };
+                    }
+
+                    return { ...chat, messages: msgs };
+                  }),
+                );
+              }
+            }
+
+            if (data.type === 'error') {
+              throw new Error(data.content);
+            }
+          } catch {
+            // ignore incomplete JSON
+          }
+        }
+      }
+
+      // Final update
+      if (fullContent) {
+        setChats((prev) =>
+          prev.map((chat) => {
+            if (chat.id !== chatIdToUse) return chat;
+
+            const msgs = [...chat.messages];
+            const lastIdx = msgs.length - 1;
+
+            if (msgs[lastIdx]?.role === 'agent') {
+              msgs[lastIdx] = { role: 'agent', content: fullContent };
+            }
+
+            return { ...chat, messages: msgs };
+          }),
+        );
+      }
     } catch (error) {
-      console.error('Backend error:', error);
-      const errorMessage: Message = {
-        role: 'agent',
-        content:
-          'I could not connect to the backend. Make sure the FastAPI server is running.',
-      };
+      console.error('Streaming error:', error);
 
-      setChats((previousChats) =>
-        previousChats.map((chat) =>
-          chat.id === chatIdToUse
-            ? { ...chat, messages: [...chat.messages, errorMessage] }
-            : chat,
-        ),
+      const errorText =
+        error instanceof Error ? error.message : 'Unknown server error';
+
+      setChats((prev) =>
+        prev.map((chat) => {
+          if (chat.id !== chatIdToUse) return chat;
+
+          const msgs = [...chat.messages];
+          const lastIdx = msgs.length - 1;
+
+          if (msgs[lastIdx]?.role === 'agent') {
+            msgs[lastIdx] = { role: 'agent', content: errorText };
+          } else {
+            msgs.push({ role: 'agent', content: errorText });
+          }
+
+          return { ...chat, messages: msgs };
+        }),
       );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
+  const handleInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
       void sendMessage();
     }
   };
@@ -282,7 +355,7 @@ function App() {
         overflow: 'hidden',
       }}
     >
-      {/* Sidebar */}
+      {/* ====================== SIDEBAR ====================== */}
       <aside
         style={{
           width: sidebarOpen ? '248px' : '0',
@@ -319,9 +392,7 @@ function App() {
           >
             🎓
           </div>
-          <div style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '-0.2px' }}>
-            JEE AI Counselor
-          </div>
+          <div style={{ fontSize: '17px', fontWeight: 700 }}>JEE AI Counselor</div>
         </div>
 
         <div style={{ padding: '14px 12px 10px' }}>
@@ -362,14 +433,7 @@ function App() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
           {chats.length === 0 ? (
-            <div
-              style={{
-                padding: '14px 10px',
-                color: colors.textMuted,
-                fontSize: '13px',
-                lineHeight: 1.5,
-              }}
-            >
+            <div style={{ padding: '14px 10px', color: colors.textMuted, fontSize: '13px' }}>
               Your conversations will appear here.
             </div>
           ) : (
@@ -382,12 +446,14 @@ function App() {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'space-between',
                     marginBottom: '4px',
                     borderRadius: '9px',
                     background: isActive ? colors.accentSoft : 'transparent',
                     borderLeft: isActive
                       ? `3px solid ${colors.accent}`
                       : '3px solid transparent',
+                    paddingRight: '4px',
                   }}
                 >
                   <button
@@ -398,6 +464,7 @@ function App() {
                       ...buttonReset,
                       flex: 1,
                       padding: '11px 12px',
+                      paddingRight: '8px',
                       background: 'transparent',
                       color: isActive ? colors.textPrimary : colors.textSecondary,
                       cursor: 'pointer',
@@ -412,29 +479,28 @@ function App() {
                     {chat.title}
                   </button>
 
-                  {/* Delete button */}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm('Delete this chat permanently?')) {
+                      if (window.confirm('Delete this chat?')) {
                         deleteChat(chat.id);
                       }
                     }}
                     title="Delete chat"
                     style={{
                       ...buttonReset,
-                      width: '32px',
-                      height: '32px',
-                      marginRight: '6px',
-                      borderRadius: '8px',
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '7px',
                       background: 'transparent',
                       color: colors.textMuted,
                       cursor: 'pointer',
-                      fontSize: '14px',
+                      fontSize: '13px',
                       display: 'grid',
                       placeItems: 'center',
-                      opacity: 0.65,
+                      flexShrink: 0,
+                      opacity: 0.7,
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = isDark
@@ -446,7 +512,7 @@ function App() {
                     onMouseLeave={(e) => {
                       e.currentTarget.style.background = 'transparent';
                       e.currentTarget.style.color = colors.textMuted;
-                      e.currentTarget.style.opacity = '0.65';
+                      e.currentTarget.style.opacity = '0.7';
                     }}
                   >
                     🗑
@@ -458,7 +524,7 @@ function App() {
         </div>
       </aside>
 
-      {/* Main area */}
+      {/* ====================== MAIN ====================== */}
       <main
         style={{
           flex: 1,
@@ -485,8 +551,7 @@ function App() {
           <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               type="button"
-              onClick={() => setSidebarOpen((prev) => !prev)}
-              aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+              onClick={() => setSidebarOpen((p) => !p)}
               style={{
                 ...buttonReset,
                 width: '36px',
@@ -505,17 +570,7 @@ function App() {
             </button>
 
             <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: '15px',
-                  fontWeight: 650,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                JEE Admission Assistant
-              </div>
+              <div style={{ fontSize: '15px', fontWeight: 650 }}>JEE Admission Assistant</div>
               <div style={{ marginTop: '2px', color: colors.textMuted, fontSize: '11px' }}>
                 Personalized admission guidance
               </div>
@@ -694,6 +749,7 @@ function App() {
             >
               {currentChat?.messages.map((message, index) => {
                 const isUser = message.role === 'user';
+                const isLastMessage = index === (currentChat?.messages.length ?? 0) - 1;
 
                 return (
                   <div
@@ -721,7 +777,9 @@ function App() {
                           display: 'grid',
                           placeItems: 'center',
                           borderRadius: '9px',
-                          background: isUser ? colors.accent : colors.elevatedBackground,
+                          background: isUser
+                            ? colors.accent
+                            : colors.elevatedBackground,
                           border: `1px solid ${colors.border}`,
                           color: isUser ? '#ffffff' : colors.textPrimary,
                           fontSize: '13px',
@@ -737,7 +795,9 @@ function App() {
                           borderRadius: isUser
                             ? '16px 5px 16px 16px'
                             : '5px 16px 16px 16px',
-                          background: isUser ? colors.accent : colors.agentMessage,
+                          background: isUser
+                            ? colors.accent
+                            : colors.agentMessage,
                           border: isUser ? 'none' : `1px solid ${colors.border}`,
                           color: isUser ? '#ffffff' : colors.textPrimary,
                           fontSize: '14px',
@@ -750,48 +810,31 @@ function App() {
                         }}
                       >
                         {message.content}
+
+                        {/* Blinking cursor while streaming */}
+                        {isLoading && isLastMessage && message.role === 'agent' && (
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              width: '7px',
+                              height: '14px',
+                              background: colors.accent,
+                              marginLeft: '2px',
+                              verticalAlign: 'middle',
+                              animation: 'blink 1s step-end infinite',
+                            }}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>
                 );
               })}
-
-              {isLoading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div
-                    style={{
-                      width: '30px',
-                      height: '30px',
-                      display: 'grid',
-                      placeItems: 'center',
-                      borderRadius: '9px',
-                      background: colors.elevatedBackground,
-                      border: `1px solid ${colors.border}`,
-                      fontSize: '12px',
-                      fontWeight: 700,
-                    }}
-                  >
-                    AI
-                  </div>
-                  <div
-                    style={{
-                      padding: '12px 16px',
-                      borderRadius: '5px 16px 16px 16px',
-                      background: colors.agentMessage,
-                      border: `1px solid ${colors.border}`,
-                      color: colors.textSecondary,
-                      fontSize: '14px',
-                    }}
-                  >
-                    Thinking<span style={{ letterSpacing: '3px' }}>...</span>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
 
-        {/* Input section */}
+        {/* Input */}
         <div style={{ padding: '14px 24px 22px', background: colors.mainBackground }}>
           <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto' }}>
             <div
@@ -849,7 +892,7 @@ function App() {
                   cursor: !input.trim() || isLoading ? 'not-allowed' : 'pointer',
                 }}
               >
-                {isLoading ? 'Wait...' : 'Send'}
+                {isLoading ? '...' : 'Send'}
               </button>
             </div>
 
@@ -867,6 +910,12 @@ function App() {
           </div>
         </div>
       </main>
+
+      <style>{`
+        @keyframes blink {
+          50% { opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
