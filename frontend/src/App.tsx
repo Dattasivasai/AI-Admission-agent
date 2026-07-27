@@ -46,48 +46,41 @@ function App() {
     elevatedBackground: isDark ? '#18181b' : '#f1f5f9',
     hoverBackground: isDark ? '#202024' : '#e8edf3',
     inputBackground: isDark ? '#18181b' : '#ffffff',
-
     border: isDark
       ? 'rgba(255, 255, 255, 0.08)'
       : 'rgba(15, 23, 42, 0.10)',
-
     textPrimary: isDark ? '#f4f4f5' : '#18181b',
     textSecondary: isDark ? '#a1a1aa' : '#64748b',
     textMuted: isDark ? '#71717a' : '#94a3b8',
-
     accent: '#7c3aed',
     accentHover: '#6d28d9',
     accentSoft: isDark
       ? 'rgba(124, 58, 237, 0.14)'
       : 'rgba(124, 58, 237, 0.10)',
-
     agentMessage: isDark ? '#18181b' : '#ffffff',
   };
 
+  // Load theme + chats, but always start on welcome screen
   useEffect(() => {
     try {
-      const savedTheme = localStorage.getItem("theme") as Theme | null;
-      const savedChats = localStorage.getItem("jeeChats");
-  
-      if (savedTheme === "dark" || savedTheme === "light") {
+      const savedTheme = localStorage.getItem('theme') as Theme | null;
+      const savedChats = localStorage.getItem('jeeChats');
+
+      if (savedTheme === 'dark' || savedTheme === 'light') {
         setTheme(savedTheme);
       }
-  
+
       if (savedChats) {
         const parsedChats = JSON.parse(savedChats) as Chat[];
-  
         if (Array.isArray(parsedChats)) {
-          // Load previous chats into the sidebar
           setChats(parsedChats);
-  
-          // IMPORTANT:
-          // Do NOT automatically open the last/first conversation.
-          // Show the welcome page instead.
-          setCurrentChatId(null);
         }
       }
+
+      // Always show welcome page on load
+      setCurrentChatId(null);
     } catch (error) {
-      console.error("Failed to load saved data:", error);
+      console.error('Failed to load saved data:', error);
     }
   }, []);
 
@@ -102,7 +95,6 @@ function App() {
 
   useEffect(() => {
     const container = chatContainerRef.current;
-
     if (container) {
       container.scrollTo({
         top: container.scrollHeight,
@@ -127,11 +119,7 @@ function App() {
 
   const generateTitle = (message: string) => {
     const cleanedMessage = message.trim();
-
-    if (!cleanedMessage) {
-      return 'New Conversation';
-    }
-
+    if (!cleanedMessage) return 'New Conversation';
     return cleanedMessage.length > 38
       ? `${cleanedMessage.slice(0, 38)}...`
       : cleanedMessage;
@@ -145,10 +133,23 @@ function App() {
 
   const startNewChat = () => {
     const newChat = createNewChat();
-
     setChats((previousChats) => [newChat, ...previousChats]);
     setCurrentChatId(newChat.id);
     setInput('');
+  };
+
+  // Delete a chat
+  const deleteChat = (chatId: string) => {
+    setChats((previousChats) => {
+      const updatedChats = previousChats.filter((chat) => chat.id !== chatId);
+
+      if (chatId === currentChatId) {
+        // If we deleted the open chat → go back to welcome screen
+        setCurrentChatId(null);
+      }
+
+      return updatedChats;
+    });
   };
 
   const selectPrompt = (prompt: string) => {
@@ -158,10 +159,7 @@ function App() {
 
   const sendMessage = async () => {
     const currentInput = input.trim();
-
-    if (!currentInput || isLoading) {
-      return;
-    }
+    if (!currentInput || isLoading) return;
 
     setInput('');
     setIsLoading(true);
@@ -176,7 +174,6 @@ function App() {
 
     if (!chatIdToUse) {
       const newChat = createNewChat();
-
       chatIdToUse = newChat.id;
 
       setChats((previousChats) => [
@@ -187,19 +184,14 @@ function App() {
         },
         ...previousChats,
       ]);
-
       setCurrentChatId(newChat.id);
     } else {
       const selectedChat = chats.find((chat) => chat.id === chatIdToUse);
-
       previousMessages = selectedChat?.messages ?? [];
 
       setChats((previousChats) =>
         previousChats.map((chat) => {
-          if (chat.id !== chatIdToUse) {
-            return chat;
-          }
-
+          if (chat.id !== chatIdToUse) return chat;
           return {
             ...chat,
             title:
@@ -214,15 +206,11 @@ function App() {
 
     try {
       const history = [...previousMessages, userMessage];
-
-      const API_URL =
-        import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: currentInput,
           history,
@@ -246,29 +234,22 @@ function App() {
       setChats((previousChats) =>
         previousChats.map((chat) =>
           chat.id === chatIdToUse
-            ? {
-                ...chat,
-                messages: [...chat.messages, agentMessage],
-              }
+            ? { ...chat, messages: [...chat.messages, agentMessage] }
             : chat,
         ),
       );
     } catch (error) {
       console.error('Backend error:', error);
-
       const errorMessage: Message = {
         role: 'agent',
         content:
-          'I could not connect to the backend. Make sure the FastAPI server is running on port 8000.',
+          'I could not connect to the backend. Make sure the FastAPI server is running.',
       };
 
       setChats((previousChats) =>
         previousChats.map((chat) =>
           chat.id === chatIdToUse
-            ? {
-                ...chat,
-                messages: [...chat.messages, errorMessage],
-              }
+            ? { ...chat, messages: [...chat.messages, errorMessage] }
             : chat,
         ),
       );
@@ -277,9 +258,7 @@ function App() {
     }
   };
 
-  const handleInputKeyDown = (
-    event: KeyboardEvent<HTMLInputElement>,
-  ) => {
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void sendMessage();
@@ -293,16 +272,16 @@ function App() {
   };
 
   return (
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          width: '100vw',
-          height: '100dvh',
-          display: 'flex',
-          overflow: 'hidden',
-        }}
-      >
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        width: '100vw',
+        height: '100dvh',
+        display: 'flex',
+        overflow: 'hidden',
+      }}
+    >
       {/* Sidebar */}
       <aside
         style={{
@@ -310,9 +289,7 @@ function App() {
           minWidth: sidebarOpen ? '248px' : '0',
           overflow: 'hidden',
           background: colors.sidebarBackground,
-          borderRight: sidebarOpen
-            ? `1px solid ${colors.border}`
-            : 'none',
+          borderRight: sidebarOpen ? `1px solid ${colors.border}` : 'none',
           display: 'flex',
           flexDirection: 'column',
           transition: 'width 0.2s ease, min-width 0.2s ease',
@@ -342,14 +319,7 @@ function App() {
           >
             🎓
           </div>
-
-          <div
-            style={{
-              fontSize: '17px',
-              fontWeight: 700,
-              letterSpacing: '-0.2px',
-            }}
-          >
+          <div style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '-0.2px' }}>
             JEE AI Counselor
           </div>
         </div>
@@ -390,13 +360,7 @@ function App() {
           Recent chats
         </div>
 
-        <div
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '0 8px 16px',
-          }}
-        >
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
           {chats.length === 0 ? (
             <div
               style={{
@@ -413,37 +377,81 @@ function App() {
               const isActive = chat.id === currentChatId;
 
               return (
-                <button
-                  type="button"
+                <div
                   key={chat.id}
-                  onClick={() => setCurrentChatId(chat.id)}
-                  title={chat.title}
                   style={{
-                    ...buttonReset,
-                    width: '100%',
-                    padding: '11px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
                     marginBottom: '4px',
                     borderRadius: '9px',
-                    background: isActive
-                      ? colors.accentSoft
-                      : 'transparent',
-                    color: isActive
-                      ? colors.textPrimary
-                      : colors.textSecondary,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontSize: '13px',
-                    fontWeight: isActive ? 600 : 500,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
+                    background: isActive ? colors.accentSoft : 'transparent',
                     borderLeft: isActive
                       ? `3px solid ${colors.accent}`
                       : '3px solid transparent',
                   }}
                 >
-                  {chat.title}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentChatId(chat.id)}
+                    title={chat.title}
+                    style={{
+                      ...buttonReset,
+                      flex: 1,
+                      padding: '11px 12px',
+                      background: 'transparent',
+                      color: isActive ? colors.textPrimary : colors.textSecondary,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: '13px',
+                      fontWeight: isActive ? 600 : 500,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {chat.title}
+                  </button>
+
+                  {/* Delete button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm('Delete this chat permanently?')) {
+                        deleteChat(chat.id);
+                      }
+                    }}
+                    title="Delete chat"
+                    style={{
+                      ...buttonReset,
+                      width: '32px',
+                      height: '32px',
+                      marginRight: '6px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      color: colors.textMuted,
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      display: 'grid',
+                      placeItems: 'center',
+                      opacity: 0.65,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = isDark
+                        ? 'rgba(239, 68, 68, 0.18)'
+                        : 'rgba(239, 68, 68, 0.12)';
+                      e.currentTarget.style.color = '#ef4444';
+                      e.currentTarget.style.opacity = '1';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = colors.textMuted;
+                      e.currentTarget.style.opacity = '0.65';
+                    }}
+                  >
+                    🗑
+                  </button>
+                </div>
               );
             })
           )}
@@ -474,17 +482,10 @@ function App() {
             gap: '18px',
           }}
         >
-          <div
-            style={{
-              minWidth: 0,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-            }}
-          >
+          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               type="button"
-              onClick={() => setSidebarOpen((previous) => !previous)}
+              onClick={() => setSidebarOpen((prev) => !prev)}
               aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
               style={{
                 ...buttonReset,
@@ -515,30 +516,15 @@ function App() {
               >
                 JEE Admission Assistant
               </div>
-
-              <div
-                style={{
-                  marginTop: '2px',
-                  color: colors.textMuted,
-                  fontSize: '11px',
-                }}
-              >
+              <div style={{ marginTop: '2px', color: colors.textMuted, fontSize: '11px' }}>
                 Personalized admission guidance
               </div>
             </div>
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-              gap: '10px',
-            }}
-          >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <button
               type="button"
-              title="Current AI model"
               style={{
                 ...buttonReset,
                 padding: '8px 12px',
@@ -551,13 +537,12 @@ function App() {
                 cursor: 'default',
               }}
             >
-              Model: llama3.1:8b
+              Model: llama-3.3-70b
             </button>
 
             <button
               type="button"
               onClick={toggleTheme}
-              aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
               style={{
                 ...buttonReset,
                 padding: '8px 13px',
@@ -568,10 +553,9 @@ function App() {
                 fontSize: '12px',
                 fontWeight: 600,
                 cursor: 'pointer',
-                whiteSpace: 'nowrap',
               }}
             >
-              {isDark ? '☀ Switch to Light' : '☾ Switch to Dark'}
+              {isDark ? '☀ Light' : '☾ Dark'}
             </button>
           </div>
         </header>
@@ -655,8 +639,7 @@ function App() {
                   style={{
                     marginTop: '32px',
                     display: 'grid',
-                    gridTemplateColumns:
-                      'repeat(auto-fit, minmax(190px, 1fr))',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
                     gap: '12px',
                   }}
                 >
@@ -689,7 +672,6 @@ function App() {
                       >
                         ↗
                       </span>
-
                       {prompt}
                     </button>
                   ))}
@@ -739,9 +721,7 @@ function App() {
                           display: 'grid',
                           placeItems: 'center',
                           borderRadius: '9px',
-                          background: isUser
-                            ? colors.accent
-                            : colors.elevatedBackground,
+                          background: isUser ? colors.accent : colors.elevatedBackground,
                           border: `1px solid ${colors.border}`,
                           color: isUser ? '#ffffff' : colors.textPrimary,
                           fontSize: '13px',
@@ -757,12 +737,8 @@ function App() {
                           borderRadius: isUser
                             ? '16px 5px 16px 16px'
                             : '5px 16px 16px 16px',
-                          background: isUser
-                            ? colors.accent
-                            : colors.agentMessage,
-                          border: isUser
-                            ? 'none'
-                            : `1px solid ${colors.border}`,
+                          background: isUser ? colors.accent : colors.agentMessage,
+                          border: isUser ? 'none' : `1px solid ${colors.border}`,
                           color: isUser ? '#ffffff' : colors.textPrimary,
                           fontSize: '14px',
                           lineHeight: 1.7,
@@ -781,13 +757,7 @@ function App() {
               })}
 
               {isLoading && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                  }}
-                >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <div
                     style={{
                       width: '30px',
@@ -803,7 +773,6 @@ function App() {
                   >
                     AI
                   </div>
-
                   <div
                     style={{
                       padding: '12px 16px',
@@ -814,8 +783,7 @@ function App() {
                       fontSize: '14px',
                     }}
                   >
-                    Thinking
-                    <span style={{ letterSpacing: '3px' }}>...</span>
+                    Thinking<span style={{ letterSpacing: '3px' }}>...</span>
                   </div>
                 </div>
               )}
@@ -824,19 +792,8 @@ function App() {
         </div>
 
         {/* Input section */}
-        <div
-          style={{
-            padding: '14px 24px 22px',
-            background: colors.mainBackground,
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: '900px',
-              margin: '0 auto',
-            }}
-          >
+        <div style={{ padding: '14px 24px 22px', background: colors.mainBackground }}>
+          <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto' }}>
             <div
               style={{
                 display: 'flex',
@@ -854,11 +811,10 @@ function App() {
               <input
                 ref={inputRef}
                 value={input}
-                onChange={(event) => setInput(event.target.value)}
+                onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleInputKeyDown}
                 placeholder="Ask about rank, college, branch or cutoffs..."
                 disabled={isLoading}
-                aria-label="Chat message"
                 style={{
                   flex: 1,
                   minWidth: 0,
@@ -887,17 +843,10 @@ function App() {
                       ? colors.elevatedBackground
                       : colors.accent,
                   color:
-                    !input.trim() || isLoading
-                      ? colors.textMuted
-                      : '#ffffff',
+                    !input.trim() || isLoading ? colors.textMuted : '#ffffff',
                   fontSize: '14px',
                   fontWeight: 700,
-                  cursor:
-                    !input.trim() || isLoading
-                      ? 'not-allowed'
-                      : 'pointer',
-                  transition:
-                    'background 0.15s ease, transform 0.15s ease',
+                  cursor: !input.trim() || isLoading ? 'not-allowed' : 'pointer',
                 }}
               >
                 {isLoading ? 'Wait...' : 'Send'}
@@ -912,8 +861,8 @@ function App() {
                 textAlign: 'center',
               }}
             >
-              AI recommendations may not always match the official JoSAA
-              results. Verify important admission information.
+              AI recommendations may not always match the official JoSAA results.
+              Verify important admission information.
             </div>
           </div>
         </div>
