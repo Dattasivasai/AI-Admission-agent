@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import os
 
@@ -9,7 +10,6 @@ from agent import app as agent_graph
 
 app = FastAPI(title="JEE Admission Agent API")
 
-# Allow all origins for now (you can restrict later)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,8 +18,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class HistoryMessage(BaseModel):
+    role: str
+    content: str
+
 class Query(BaseModel):
     message: str
+    history: Optional[List[HistoryMessage]] = []
 
 @app.get("/")
 async def home():
@@ -28,12 +33,23 @@ async def home():
 @app.post("/chat")
 async def chat(query: Query):
     try:
-        # Convert to proper LangChain messages
+        messages = []
+
+        # Convert frontend history → LangChain messages
+        for msg in query.history or []:
+            if msg.role == "user":
+                messages.append(HumanMessage(content=msg.content))
+            elif msg.role == "agent":
+                messages.append(AIMessage(content=msg.content))
+
+        # Add the new user message
+        messages.append(HumanMessage(content=query.message))
+
+        # Run the agent
         result = await agent_graph.ainvoke({
-            "messages": [HumanMessage(content=query.message)]
+            "messages": messages
         })
 
-        # Get the final AI response
         final_message = result["messages"][-1]
         response_text = final_message.content
 
