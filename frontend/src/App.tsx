@@ -155,34 +155,39 @@ function App() {
   const sendMessage = async () => {
     const currentInput = input.trim();
     if (!currentInput || isLoading) return;
-
+  
     setInput('');
     setIsLoading(true);
-
+  
     const userMessage: Message = { role: 'user', content: currentInput };
-    const thinkingMessage: Message = { role: 'agent', content: 'Thinking...' };
-
+    const optimisticAgentMessage: Message = {
+      role: 'agent',
+      content: 'Thinking...',
+    };
+  
     let chatIdToUse = currentChatId;
     let previousMessages: Message[] = [];
-
-    // ========== Create or update chat in ONE state update ==========
+  
+    // ========== OPTIMISTIC UPDATE (happens instantly) ==========
     if (!chatIdToUse) {
+      // New conversation
       const newChat = createNewChat();
       chatIdToUse = newChat.id;
-
+  
       setChats((prev) => [
         {
           ...newChat,
           title: generateTitle(currentInput),
-          messages: [userMessage, thinkingMessage],
+          messages: [userMessage, optimisticAgentMessage],
         },
         ...prev,
       ]);
       setCurrentChatId(newChat.id);
     } else {
+      // Existing conversation
       const selected = chats.find((c) => c.id === chatIdToUse);
       previousMessages = selected?.messages ?? [];
-
+  
       setChats((prev) =>
         prev.map((chat) =>
           chat.id === chatIdToUse
@@ -192,16 +197,17 @@ function App() {
                   chat.messages.length === 0
                     ? generateTitle(currentInput)
                     : chat.title,
-                messages: [...chat.messages, userMessage, thinkingMessage],
+                messages: [...chat.messages, userMessage, optimisticAgentMessage],
               }
             : chat,
         ),
       );
     }
-
+  
+    // ========== NETWORK REQUEST ==========
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
+  
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,112 +216,113 @@ function App() {
           history: previousMessages,
         }),
       });
-
+  
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`);
       }
-
+  
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
-
+  
       const decoder = new TextDecoder();
       let buffer = '';
       let fullContent = '';
       let lastUpdate = 0;
-
+  
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
+  
         buffer += decoder.decode(value, { stream: true });
-
+  
         // Proper SSE buffering
         const events = buffer.split('\n\n');
         buffer = events.pop() || '';
-
+  
         for (const event of events) {
           const lines = event.split('\n');
-
+  
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue;
-
+  
             try {
               const data = JSON.parse(line.slice(6));
-
+  
               if (data.type === 'token') {
                 fullContent += data.content;
-
+  
                 const now = Date.now();
-                // Update every ~80ms
-                if (now - lastUpdate > 80 || fullContent.length < 20) {
+                // Throttle UI updates
+                if (now - lastUpdate > 80 || fullContent.length < 15) {
                   lastUpdate = now;
-
+  
                   setChats((prev) =>
                     prev.map((chat) => {
                       if (chat.id !== chatIdToUse) return chat;
-
+  
                       const msgs = [...chat.messages];
                       const lastIdx = msgs.length - 1;
-
+  
                       if (msgs[lastIdx]?.role === 'agent') {
                         msgs[lastIdx] = {
                           role: 'agent',
                           content: fullContent,
                         };
                       }
-
+  
                       return { ...chat, messages: msgs };
                     }),
                   );
                 }
               }
-
+  
               if (data.type === 'error') {
                 throw new Error(data.content);
               }
             } catch (err) {
-              console.error('SSE parse error:', err, line);
+              console.error('SSE parse error:', err);
             }
           }
         }
       }
-
-      // Final update to ensure last tokens are shown
+  
+      // Final update (make sure last tokens are shown)
       if (fullContent) {
         setChats((prev) =>
           prev.map((chat) => {
             if (chat.id !== chatIdToUse) return chat;
-
+  
             const msgs = [...chat.messages];
             const lastIdx = msgs.length - 1;
-
+  
             if (msgs[lastIdx]?.role === 'agent') {
               msgs[lastIdx] = { role: 'agent', content: fullContent };
             }
-
+  
             return { ...chat, messages: msgs };
           }),
         );
       }
     } catch (error) {
       console.error('Streaming error:', error);
-
+  
       const errorText =
         error instanceof Error ? error.message : 'Unknown server error';
-
+  
+      // Rollback optimistic agent message → show error instead
       setChats((prev) =>
         prev.map((chat) => {
           if (chat.id !== chatIdToUse) return chat;
-
+  
           const msgs = [...chat.messages];
           const lastIdx = msgs.length - 1;
-
+  
           if (msgs[lastIdx]?.role === 'agent') {
             msgs[lastIdx] = { role: 'agent', content: errorText };
           } else {
             msgs.push({ role: 'agent', content: errorText });
           }
-
+  
           return { ...chat, messages: msgs };
         }),
       );
