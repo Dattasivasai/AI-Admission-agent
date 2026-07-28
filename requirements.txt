@@ -8,5 +8,5 @@ python-dotenv
 pandas
 fastapi
 uvicorn
-langchain-groq
 groq
+langchain-groq==0.3.7

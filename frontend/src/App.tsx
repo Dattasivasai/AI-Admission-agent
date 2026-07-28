@@ -17,7 +17,7 @@ interface Chat {
   messages: Message[];
 }
 
-type Theme = 'dark' | 'light';
+// type Theme = 'dark' | 'light';
 
 const EXAMPLE_PROMPTS = [
   'Which NIT can I get with 25,000 rank?',
@@ -392,7 +392,7 @@ function App() {
           >
             🎓
           </div>
-          <div style={{ fontSize: '17px', fontWeight: 700 }}>JEE AI Counselor</div>
+          <div style={{ fontSize: '17px', fontWeight: 700 }}>AI Counselor</div>
         </div>
 
         <div style={{ padding: '14px 12px 10px' }}>
@@ -571,7 +571,7 @@ function App() {
             </button>
 
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '15px', fontWeight: 650 }}>JEE Admission Assistant</div>
+              <div style={{ fontSize: '15px', fontWeight: 650 }}>Admission Assistant</div>
               <div style={{ marginTop: '2px', color: colors.textMuted, fontSize: '11px' }}>
                 Personalized admission guidance
               </div>
@@ -596,7 +596,7 @@ function App() {
               Model: llama-3.3-70b
             </button>
 
-            <button
+            {/* <button
               type="button"
               onClick={toggleTheme}
               style={{
@@ -612,7 +612,7 @@ function App() {
               }}
             >
               {isDark ? '☀ Light' : '☾ Dark'}
-            </button>
+            </button> */}
           </div>
         </header>
 
