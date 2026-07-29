@@ -1,3 +1,5 @@
+import { auth, googleProvider } from './firebase';
+import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   useEffect,
   useRef,
@@ -33,6 +35,28 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [theme, setTheme] = useState<Theme>('dark');
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [profileOpen, setProfileOpen] = useState(false);
+  useEffect(() => {
+    if (!profileOpen) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-profile-menu]')) {
+        setProfileOpen(false);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleClick);
+    }, 0);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handleClick);
+    };
+  }, [profileOpen]);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +83,31 @@ function App() {
       ? 'rgba(124, 58, 237, 0.14)'
       : 'rgba(124, 58, 237, 0.10)',
     agentMessage: isDark ? '#18181b' : '#ffffff',
+  };
+
+  //Listen for login state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+  const handleGoogleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error('Google login failed:', error);
+      alert('Login failed. Please try again.');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
   };
 
   // Load saved data → always start on welcome screen
@@ -155,25 +204,25 @@ function App() {
   const sendMessage = async () => {
     const currentInput = input.trim();
     if (!currentInput || isLoading) return;
-  
+
     setInput('');
     setIsLoading(true);
-  
+
     const userMessage: Message = { role: 'user', content: currentInput };
     const optimisticAgentMessage: Message = {
       role: 'agent',
       content: 'Thinking...',
     };
-  
+
     let chatIdToUse = currentChatId;
     let previousMessages: Message[] = [];
-  
+
     // ========== OPTIMISTIC UPDATE (happens instantly) ==========
     if (!chatIdToUse) {
       // New conversation
       const newChat = createNewChat();
       chatIdToUse = newChat.id;
-  
+
       setChats((prev) => [
         {
           ...newChat,
@@ -187,27 +236,27 @@ function App() {
       // Existing conversation
       const selected = chats.find((c) => c.id === chatIdToUse);
       previousMessages = selected?.messages ?? [];
-  
+
       setChats((prev) =>
         prev.map((chat) =>
           chat.id === chatIdToUse
             ? {
-                ...chat,
-                title:
-                  chat.messages.length === 0
-                    ? generateTitle(currentInput)
-                    : chat.title,
-                messages: [...chat.messages, userMessage, optimisticAgentMessage],
-              }
+              ...chat,
+              title:
+                chat.messages.length === 0
+                  ? generateTitle(currentInput)
+                  : chat.title,
+              messages: [...chat.messages, userMessage, optimisticAgentMessage],
+            }
             : chat,
         ),
       );
     }
-  
+
     // ========== NETWORK REQUEST ==========
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-  
+
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -216,66 +265,66 @@ function App() {
           history: previousMessages,
         }),
       });
-  
+
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`);
       }
-  
+
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
-  
+
       const decoder = new TextDecoder();
       let buffer = '';
       let fullContent = '';
       let lastUpdate = 0;
-  
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-  
+
         buffer += decoder.decode(value, { stream: true });
-  
+
         // Proper SSE buffering
         const events = buffer.split('\n\n');
         buffer = events.pop() || '';
-  
+
         for (const event of events) {
           const lines = event.split('\n');
-  
+
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue;
-  
+
             try {
               const data = JSON.parse(line.slice(6));
-  
+
               if (data.type === 'token') {
                 fullContent += data.content;
-  
+
                 const now = Date.now();
                 // Throttle UI updates
                 if (now - lastUpdate > 80 || fullContent.length < 15) {
                   lastUpdate = now;
-  
+
                   setChats((prev) =>
                     prev.map((chat) => {
                       if (chat.id !== chatIdToUse) return chat;
-  
+
                       const msgs = [...chat.messages];
                       const lastIdx = msgs.length - 1;
-  
+
                       if (msgs[lastIdx]?.role === 'agent') {
                         msgs[lastIdx] = {
                           role: 'agent',
                           content: fullContent,
                         };
                       }
-  
+
                       return { ...chat, messages: msgs };
                     }),
                   );
                 }
               }
-  
+
               if (data.type === 'error') {
                 throw new Error(data.content);
               }
@@ -285,44 +334,44 @@ function App() {
           }
         }
       }
-  
+
       // Final update (make sure last tokens are shown)
       if (fullContent) {
         setChats((prev) =>
           prev.map((chat) => {
             if (chat.id !== chatIdToUse) return chat;
-  
+
             const msgs = [...chat.messages];
             const lastIdx = msgs.length - 1;
-  
+
             if (msgs[lastIdx]?.role === 'agent') {
               msgs[lastIdx] = { role: 'agent', content: fullContent };
             }
-  
+
             return { ...chat, messages: msgs };
           }),
         );
       }
     } catch (error) {
       console.error('Streaming error:', error);
-  
+
       const errorText =
         error instanceof Error ? error.message : 'Unknown server error';
-  
+
       // Rollback optimistic agent message → show error instead
       setChats((prev) =>
         prev.map((chat) => {
           if (chat.id !== chatIdToUse) return chat;
-  
+
           const msgs = [...chat.messages];
           const lastIdx = msgs.length - 1;
-  
+
           if (msgs[lastIdx]?.role === 'agent') {
             msgs[lastIdx] = { role: 'agent', content: errorText };
           } else {
             msgs.push({ role: 'agent', content: errorText });
           }
-  
+
           return { ...chat, messages: msgs };
         }),
       );
@@ -549,6 +598,7 @@ function App() {
             gap: '18px',
           }}
         >
+          {/* Left */}
           <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               type="button"
@@ -578,6 +628,7 @@ function App() {
             </div>
           </div>
 
+          {/* Right */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <button
               type="button"
@@ -596,26 +647,185 @@ function App() {
               Model: llama-3.3-70b
             </button>
 
-            {/* <button
-              type="button"
-              onClick={toggleTheme}
-              style={{
-                ...buttonReset,
-                padding: '8px 13px',
-                borderRadius: '999px',
-                background: colors.elevatedBackground,
-                border: `1px solid ${colors.border}`,
-                color: colors.textPrimary,
-                fontSize: '12px',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {isDark ? '☀ Light' : '☾ Dark'}
-            </button> */}
+            {authLoading ? null : user ? (
+              <div style={{ position: 'relative' }} data-profile-menu>
+                {/* Clickable profile area */}
+                <button
+                  type="button"
+                  onClick={() => setProfileOpen((p) => !p)}
+                  style={{
+                    ...buttonReset,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '4px 8px 4px 4px',
+                    borderRadius: '999px',
+                    background: profileOpen ? colors.elevatedBackground : 'transparent',
+                    border: `1px solid ${profileOpen ? colors.border : 'transparent'}`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {user.photoURL ? (
+                    <img
+                      src={user.photoURL}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                      }}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        background: colors.elevatedBackground,
+                        border: `1px solid ${colors.border}`,
+                        display: 'grid',
+                        placeItems: 'center',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        color: colors.textSecondary,
+                      }}
+                    >
+                      {(user.displayName || user.email || '?')[0].toUpperCase()}
+                    </div>
+                  )}
+
+                  <span
+                    style={{
+                      fontSize: '13px',
+                      color: colors.textSecondary,
+                      maxWidth: '120px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {user.displayName || user.email}
+                  </span>
+                </button>
+
+                {/* Dropdown */}
+                {profileOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 8px)',
+                      right: 0,
+                      minWidth: '180px',
+                      background: colors.elevatedBackground,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: '12px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                      padding: '6px',
+                      zIndex: 50,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        // TODO: open help
+                      }}
+                      style={{
+                        ...buttonReset,
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        color: colors.textPrimary,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        background: 'transparent',
+                      }}
+                    >
+                      Help
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        // TODO: open settings
+                      }}
+                      style={{
+                        ...buttonReset,
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        color: colors.textPrimary,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        background: 'transparent',
+                      }}
+                    >
+                      Settings
+                    </button>
+
+                    <div style={{ height: '1px', background: colors.border, margin: '4px 0' }} />
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        handleLogout();
+                      }}
+                      style={{
+                        ...buttonReset,
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        color: '#ef4444',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        background: 'transparent',
+                      }}
+                    >
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                style={{
+                  ...buttonReset,
+                  padding: '8px 14px',
+                  borderRadius: '999px',
+                  background: '#fff',
+                  border: '1px solid #dadce0',
+                  color: '#3c4043',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <img
+                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                  alt=""
+                  width="16"
+                  height="16"
+                />
+                Sign in with Google
+              </button>
+            )}
           </div>
         </header>
-
         <div
           ref={chatContainerRef}
           style={{
@@ -654,11 +864,10 @@ function App() {
                     display: 'grid',
                     placeItems: 'center',
                     background: colors.accentSoft,
-                    border: `1px solid ${
-                      isDark
-                        ? 'rgba(124, 58, 237, 0.25)'
-                        : 'rgba(124, 58, 237, 0.18)'
-                    }`,
+                    border: `1px solid ${isDark
+                      ? 'rgba(124, 58, 237, 0.25)'
+                      : 'rgba(124, 58, 237, 0.18)'
+                      }`,
                     fontSize: '27px',
                   }}
                 >

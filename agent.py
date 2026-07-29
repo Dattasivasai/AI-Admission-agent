@@ -240,14 +240,14 @@ def search_josaa_cutoffs(
     limit: int = 40,
 ) -> str:
     """
-    Search real JoSAA opening & closing ranks (2016–2024, all rounds).
+    Search real JoSAA opening & closing ranks (2016–2026, all rounds).
 
     Use this tool for ANY question about colleges, branches, cutoffs, ranks, categories, years, quotas.
 
     Parameters (all optional):
     - institute: college name or common short form (e.g. "NIT Trichy", "IIT Bombay", "IIIT Hyderabad", "NITT")
     - program: branch name or short form (e.g. "CSE", "Computer Science", "Mechanical", "ECE")
-    - year: 2016 to 2024
+    - year: 2016 to 2026
     - round: counselling round number
     - category: OPEN, EWS, OBC-NCL, SC, ST, OPEN (PwD), etc.
     - quota: AI, HS, OS, GO, JK, LA
@@ -349,7 +349,7 @@ llm = ChatGroq(
 
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are an expert JEE Main + JoSAA Admission Counselor with access to real historical cutoff data (2016–2024).
+SYSTEM_PROMPT = """You are an expert JEE Main + JoSAA Admission Counselor with access to real historical cutoff data (2016–2026).
 
 STRICT RULES:
 1. For ANY question involving colleges, branches, cutoffs, ranks, categories, years, quotas, or "what can I get" → ALWAYS call the tool `search_josaa_cutoffs`.
@@ -358,10 +358,16 @@ STRICT RULES:
    - ALWAYS call search_josaa_cutoffs with min_closing_rank = their rank
    - Optionally filter by institute (e.g. institute="NIT" or institute="National Institute of Technology")
    - Prefer recent years (2024 or 2025) and OPEN + Gender-Neutral if category/gender not specified
-4. Prefer showing recent years (2023–2024) and final rounds when possible.
+4. Prefer showing recent years (2024–2026) and final rounds when possible.
 5. Be honest about data limitations (no 2025/2026 data yet).
 6. After getting tool results, give a clear, structured, helpful answer.
 7. For percentile → rank conversion use `percentile_to_rank`.
+8. When reporting cutoffs, ALWAYS mention:
+   - Year and Round
+   - Quota (OS / HS / AI)
+   - Category (OPEN / OBC-NCL / etc.)
+   - Gender
+   Never give a single number without these details.
 
 Respond in a professional, honest, and student-friendly tone."""
 
