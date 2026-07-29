@@ -19,8 +19,6 @@ interface Chat {
   messages: Message[];
 }
 
-// type Theme = 'dark' | 'light';
-
 const EXAMPLE_PROMPTS = [
   'Which NIT can I get with 25,000 rank?',
   'Show CSE cutoffs for NIT Trichy',
@@ -33,7 +31,6 @@ function App() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [theme, setTheme] = useState<Theme>('dark');
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -63,26 +60,21 @@ function App() {
 
   const currentChat = chats.find((chat) => chat.id === currentChatId);
   const hasMessages = Boolean(currentChat?.messages.length);
-  const isDark = theme === 'dark';
 
   const colors = {
-    mainBackground: isDark ? '#09090b' : '#f8fafc',
-    sidebarBackground: isDark ? '#0c0c0f' : '#ffffff',
-    elevatedBackground: isDark ? '#18181b' : '#f1f5f9',
-    hoverBackground: isDark ? '#202024' : '#e8edf3',
-    inputBackground: isDark ? '#18181b' : '#ffffff',
-    border: isDark
-      ? 'rgba(255, 255, 255, 0.08)'
-      : 'rgba(15, 23, 42, 0.10)',
-    textPrimary: isDark ? '#f4f4f5' : '#18181b',
-    textSecondary: isDark ? '#a1a1aa' : '#64748b',
-    textMuted: isDark ? '#71717a' : '#94a3b8',
+    mainBackground: '#09090b',
+    sidebarBackground: '#0c0c0f',
+    elevatedBackground: '#18181b',
+    hoverBackground: '#202024',
+    inputBackground: '#18181b',
+    border: 'rgba(255, 255, 255, 0.08)',
+    textPrimary: '#f4f4f5',
+    textSecondary: '#a1a1aa',
+    textMuted: '#71717a',
     accent: '#7c3aed',
     accentHover: '#6d28d9',
-    accentSoft: isDark
-      ? 'rgba(124, 58, 237, 0.14)'
-      : 'rgba(124, 58, 237, 0.10)',
-    agentMessage: isDark ? '#18181b' : '#ffffff',
+    accentSoft: 'rgba(124, 58, 237, 0.14)',
+    agentMessage: '#18181b',
   };
 
   //Listen for login state
@@ -113,12 +105,7 @@ function App() {
   // Load saved data → always start on welcome screen
   useEffect(() => {
     try {
-      const savedTheme = localStorage.getItem('theme') as Theme | null;
       const savedChats = localStorage.getItem('jeeChats');
-
-      if (savedTheme === 'dark' || savedTheme === 'light') {
-        setTheme(savedTheme);
-      }
 
       if (savedChats) {
         const parsed = JSON.parse(savedChats) as Chat[];
@@ -132,11 +119,6 @@ function App() {
       console.error('Failed to load saved data:', error);
     }
   }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
 
   useEffect(() => {
     localStorage.setItem('jeeChats', JSON.stringify(chats));
@@ -155,10 +137,6 @@ function App() {
   useEffect(() => {
     inputRef.current?.focus();
   }, [currentChatId]);
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  };
 
   const generateChatId = () =>
     `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -556,9 +534,7 @@ function App() {
                       transition: 'opacity 0.15s ease',
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = isDark
-                        ? 'rgba(239, 68, 68, 0.18)'
-                        : 'rgba(239, 68, 68, 0.12)';
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.18)';
                       e.currentTarget.style.color = '#ef4444';
                     }}
                     onMouseLeave={(e) => {
@@ -864,10 +840,7 @@ function App() {
                     display: 'grid',
                     placeItems: 'center',
                     background: colors.accentSoft,
-                    border: `1px solid ${isDark
-                      ? 'rgba(124, 58, 237, 0.25)'
-                      : 'rgba(124, 58, 237, 0.18)'
-                      }`,
+                    border: '1px solid rgba(124, 58, 237, 0.25)',
                     fontSize: '27px',
                   }}
                 >
@@ -1054,9 +1027,7 @@ function App() {
                 borderRadius: '18px',
                 background: colors.inputBackground,
                 border: `1px solid ${colors.border}`,
-                boxShadow: isDark
-                  ? '0 12px 35px rgba(0, 0, 0, 0.28)'
-                  : '0 12px 35px rgba(15, 23, 42, 0.08)',
+                boxShadow: '0 12px 35px rgba(0, 0, 0, 0.28)',
               }}
             >
               <input
