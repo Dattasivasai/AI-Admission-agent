@@ -33,7 +33,7 @@ function App() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [theme, setTheme] = useState<Theme>('dark');
+  //const [theme, setTheme] = useState<Theme>('dark');
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -156,9 +156,9 @@ function App() {
     inputRef.current?.focus();
   }, [currentChatId]);
 
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  };
+  // const toggleTheme = () => {
+  //   setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  // };
 
   const generateChatId = () =>
     `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
