@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -12,14 +13,36 @@ import operator
 
 load_dotenv()
 
+# ====================== DATA LOADING (ONCE) ======================
+
+DATA_PATH = Path(__file__).parent / "josaa_cutoffs.csv"
+
+
+def _load_josaa_data() -> pd.DataFrame:
+    df = pd.read_csv(DATA_PATH)
+
+    df["opening_rank"] = pd.to_numeric(df["opening_rank"], errors="coerce")
+    df["closing_rank"] = pd.to_numeric(df["closing_rank"], errors="coerce")
+    df = df.dropna(subset=["closing_rank"])
+
+    # Older years sometimes have empty gender
+    df["gender"] = df["gender"].fillna("Gender-Neutral")
+
+    return df
+
+
+JOSAA_DF = _load_josaa_data()
+print(
+    f"✅ Loaded {len(JOSAA_DF):,} JoSAA records ({JOSAA_DF['year'].min()}–{JOSAA_DF['year'].max()})"
+)
+
+
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
-# ====================== TOOLS ======================
 
-# ====================== TOOLS ======================
+# ====================== ALIASES (CLEANED) ======================
 
-# Common short names → official institute names (expand later if needed)
 INSTITUTE_ALIASES = {
     # IITs
     "iitb": "Indian Institute of Technology Bombay",
@@ -60,7 +83,6 @@ INSTITUTE_ALIASES = {
     "iit bhilai": "Indian Institute of Technology Bhilai",
     "iit jammu": "Indian Institute of Technology Jammu",
     "iit goa": "Indian Institute of Technology Goa",
-
     # NITs
     "nit trichy": "National Institute of Technology, Tiruchirappalli",
     "nit-t": "National Institute of Technology, Tiruchirappalli",
@@ -84,7 +106,6 @@ INSTITUTE_ALIASES = {
     "nit durgapur": "National Institute of Technology Durgapur",
     "nitdgp": "National Institute of Technology Durgapur",
     "nit silchar": "National Institute of Technology Silchar",
-    "nits": "National Institute of Technology Silchar",
     "nit hamirpur": "National Institute of Technology Hamirpur",
     "nith": "National Institute of Technology Hamirpur",
     "nit jalandhar": "Dr. B R Ambedkar National Institute of Technology, Jalandhar",
@@ -118,12 +139,8 @@ INSTITUTE_ALIASES = {
     "nit sikkim": "National Institute of Technology Sikkim",
     "nitsk": "National Institute of Technology Sikkim",
     "nit arunachal": "National Institute of Technology Arunachal Pradesh",
-    "nitap": "National Institute of Technology Arunachal Pradesh",
     "nit uttarakhand": "National Institute of Technology Uttarakhand",
     "nitu": "National Institute of Technology Uttarakhand",
-    "nit": "National Institute of Technology",
-    "nits": "National Institute of Technology",
-
     # IIITs
     "iiit hyderabad": "International Institute of Information Technology, Hyderabad",
     "iiith": "International Institute of Information Technology, Hyderabad",
@@ -143,6 +160,7 @@ INSTITUTE_ALIASES = {
     "iiitk": "Indian Institute of Information Technology(IIIT) Kottayam",
     "iiit sri city": "Indian Institute of Information Technology, Sri City",
     "iiits": "Indian Institute of Information Technology, Sri City",
+    "iiit sricity": "Indian Institute of Information Technology, Sri City",
     "iiit guwahati": "Indian Institute of Information Technology Guwahati",
     "iiitg": "Indian Institute of Information Technology Guwahati",
     "iiit pune": "Indian Institute of Information Technology, Pune",
@@ -162,8 +180,8 @@ INSTITUTE_ALIASES = {
     "iiit ranchi": "Indian Institute of Information Technology Ranchi",
     "iiitr": "Indian Institute of Information Technology Ranchi",
     "iiit bhagalpur": "Indian Institute of Information Technology Bhagalpur",
-    "iiitbhopal": "Indian Institute of Information Technology Bhopal",
     "iiit bhopal": "Indian Institute of Information Technology Bhopal",
+    "iiitbhopal": "Indian Institute of Information Technology Bhopal",
     "iiit surat": "Indian Institute of Information Technology Surat",
     "iiitsurat": "Indian Institute of Information Technology Surat",
     "iiit manipur": "Indian Institute of Information Technology Manipur",
@@ -173,12 +191,6 @@ INSTITUTE_ALIASES = {
     "iiit sonepat": "Indian Institute of Information Technology Sonepat",
     "iiitsonepat": "Indian Institute of Information Technology Sonepat",
     "iiit agartala": "Indian Institute of Information Technology Agartala",
-    "iiita": "Indian Institute of Information Technology Agartala",
-    "iiit kottayam": "Kottayam",
-    "iiitk": "Kottayam",
-    "iiit sri city": "Sri City",
-    "iiits": "Sri City",
-    "iiit sricity": "Sri City",
 }
 
 PROGRAM_ALIASES = {
@@ -226,6 +238,9 @@ PROGRAM_ALIASES = {
 }
 
 
+# ====================== TOOLS ======================
+
+
 @tool
 def search_josaa_cutoffs(
     institute: str = None,
@@ -237,90 +252,101 @@ def search_josaa_cutoffs(
     gender: str = None,
     max_closing_rank: int = None,
     min_closing_rank: int = None,
-    limit: int = 40,
+    limit: int = 25,
 ) -> str:
     """
-    Search real JoSAA opening & closing ranks (2016–2026, all rounds).
+    Search real JoSAA opening & closing ranks (2016–2026).
 
     Use this tool for ANY question about colleges, branches, cutoffs, ranks, categories, years, quotas.
-
-    Parameters (all optional):
-    - institute: college name or common short form (e.g. "NIT Trichy", "IIT Bombay", "IIIT Hyderabad", "NITT")
-    - program: branch name or short form (e.g. "CSE", "Computer Science", "Mechanical", "ECE")
-    - year: 2016 to 2026
-    - round: counselling round number
-    - category: OPEN, EWS, OBC-NCL, SC, ST, OPEN (PwD), etc.
-    - quota: AI, HS, OS, GO, JK, LA
-    - gender: "Gender-Neutral" or "Female-only"
-    - max_closing_rank: only return seats whose closing_rank is ≤ this value
-    - min_closing_rank: only return seats whose closing_rank is ≥ this value
-        (IMPORTANT: when user asks "what can I get with rank X", always use min_closing_rank = X)
-    - limit: max rows to return (default 40)
-
-    Always prefer calling this tool instead of guessing numbers.
+    When the user asks "what can I get with rank X", ALWAYS set min_closing_rank = X.
     """
-    try:
-        df = pd.read_csv("josaa_cutoffs.csv")
+    df = JOSAA_DF.copy()
 
-        # --- Institute filter ---
-        # --- Institute filter ---
-        if institute:
-            inst_lower = institute.lower().strip()
-            resolved = INSTITUTE_ALIASES.get(inst_lower, institute)
+    if institute:
+        inst_lower = institute.lower().strip()
+        resolved = INSTITUTE_ALIASES.get(inst_lower, institute)
+        df = df[
+            df["institute"].str.contains(resolved, case=False, na=False, regex=False)
+        ]
 
-            # Search for the key part of the name (much more robust)
-            mask = df["institute"].str.contains(resolved, case=False, na=False, regex=False)
-            df = df[mask]
+    if program:
+        prog_lower = program.lower().strip()
+        resolved_prog = PROGRAM_ALIASES.get(prog_lower, program)
+        df = df[
+            df["academic_program"].str.contains(resolved_prog, case=False, na=False)
+        ]
 
-        # --- Program / branch filter ---
-        if program:
-            prog_lower = program.lower().strip()
-            resolved_prog = PROGRAM_ALIASES.get(prog_lower, program)
-            mask = df["academic_program"].str.contains(resolved_prog, case=False, na=False)
-            df = df[mask]
+    if year is not None:
+        df = df[df["year"] == year]
+    if round is not None:
+        df = df[df["round"] == round]
+    if category:
+        df = df[df["seat_type"].str.contains(category, case=False, na=False)]
+    if quota:
+        df = df[df["quota"].str.upper() == quota.upper()]
+    if gender:
+        df = df[df["gender"].str.contains(gender, case=False, na=False)]
 
-        # --- Exact filters ---
-        if year is not None:
-            df = df[df["year"] == year]
-        if round is not None:
-            df = df[df["round"] == round]
-        if category:
-            df = df[df["seat_type"].str.contains(category, case=False, na=False)]
-        if quota:
-            df = df[df["quota"].str.upper() == quota.upper()]
-        if gender:
-            df = df[df["gender"].str.contains(gender, case=False, na=False)]
+    if max_closing_rank is not None:
+        df = df[df["closing_rank"] <= max_closing_rank]
+    if min_closing_rank is not None:
+        df = df[df["closing_rank"] >= min_closing_rank]
 
-        # --- Rank range filters ---
-        if max_closing_rank is not None:
-            df = df[df["closing_rank"] <= max_closing_rank]
-        if min_closing_rank is not None:
-            df = df[df["closing_rank"] >= min_closing_rank]
-
-        total = len(df)
-        if total == 0:
-            return (
-                f"No matching records found.\n"
-                f"Filters used → institute={institute}, program={program}, year={year}, "
-                f"category={category}, quota={quota}, gender={gender}, "
-                f"max_closing_rank={max_closing_rank}"
-            )
-
-        # Prefer latest years and final-ish rounds when many results
-        df = df.sort_values(
-            by=["year", "round", "closing_rank"],
-            ascending=[False, False, True]
-        )
-
-        result = df.head(limit).to_string(index=False)
-
+    total = len(df)
+    if total == 0:
         return (
-            f"Found {total} matching rows (showing top {min(limit, total)} sorted by latest year/round):\n\n"
-            f"{result}"
+            "No matching records found.\n"
+            f"Filters → institute={institute}, program={program}, year={year}, "
+            f"category={category}, quota={quota}, gender={gender}, "
+            f"min_closing_rank={min_closing_rank}, max_closing_rank={max_closing_rank}"
         )
 
-    except Exception as e:
-        return f"Error while searching JoSAA data: {str(e)}"
+    # Prefer non-PwD, OPEN, Gender-Neutral seats when many results exist
+    df = df.copy()
+    df["_is_pwd"] = df["seat_type"].str.contains("PwD", case=False, na=False)
+    df["_is_open"] = df["seat_type"].str.upper().str.startswith("OPEN")
+    df["_is_gender_neutral"] = df["gender"].str.contains(
+        "Gender-Neutral", case=False, na=False
+    )
+
+    df = df.sort_values(
+        by=[
+            "year",
+            "round",
+            "_is_pwd",
+            "_is_open",
+            "_is_gender_neutral",
+            "closing_rank",
+        ],
+        ascending=[False, False, True, False, False, True],
+    )
+
+    cols = [
+        "year",
+        "round",
+        "institute",
+        "academic_program",
+        "quota",
+        "seat_type",
+        "gender",
+        "opening_rank",
+        "closing_rank",
+    ]
+    result_df = df[cols].head(limit)
+
+    lines = [
+        f"Found {total} matching rows "
+        f"(showing top {len(result_df)} by latest year/round, preferring non-PwD & OPEN):\n"
+    ]
+    for _, row in result_df.iterrows():
+        orank = int(row["opening_rank"]) if pd.notna(row["opening_rank"]) else "N/A"
+        crank = int(row["closing_rank"])
+        lines.append(
+            f"• {row['year']} R{row['round']} | {row['institute']} | {row['academic_program']} | "
+            f"{row['quota']} | {row['seat_type']} | {row['gender']} | OR {orank} – CR {crank}"
+        )
+
+    return "\n".join(lines)
 
 
 @tool
@@ -344,7 +370,7 @@ tools = [search_josaa_cutoffs, percentile_to_rank]
 llm = ChatGroq(
     model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
     temperature=0.1,
-    api_key=os.getenv("GROQ_API_KEY") or os.getenv("API_key")
+    api_key=os.getenv("GROQ_API_KEY") or os.getenv("API_key"),
 )
 
 llm_with_tools = llm.bind_tools(tools)
@@ -359,7 +385,7 @@ STRICT RULES:
    - Optionally filter by institute (e.g. institute="NIT" or institute="National Institute of Technology")
    - Prefer recent years (2024 or 2025) and OPEN + Gender-Neutral if category/gender not specified
 4. Prefer showing recent years (2024–2026) and final rounds when possible.
-5. Be honest about data limitations (no 2025/2026 data yet).
+5. Be honest about data limitations. Data covers 2016–2026; treat recent years as more relevant for counselling.
 6. After getting tool results, give a clear, structured, helpful answer.
 7. For percentile → rank conversion use `percentile_to_rank`.
 8. When reporting cutoffs, ALWAYS mention:
@@ -370,6 +396,7 @@ STRICT RULES:
    Never give a single number without these details.
 
 Respond in a professional, honest, and student-friendly tone."""
+
 
 def agent_node(state: AgentState):
     messages = list(state["messages"])
