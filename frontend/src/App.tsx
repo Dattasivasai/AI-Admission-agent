@@ -1,5 +1,16 @@
-import { auth, googleProvider } from './firebase';
+import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import {
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  query,
+  orderBy,
+  serverTimestamp,
+} from 'firebase/firestore';
+
 import {
   useEffect,
   useRef,
@@ -24,6 +35,39 @@ const EXAMPLE_PROMPTS = [
   'Show CSE cutoffs for NIT Trichy',
   'Compare IIIT Kottayam and IIIT Sri City',
 ];
+
+async function loadUserChats(uid: string): Promise<Chat[]> {
+  const q = query(
+    collection(db, 'users', uid, 'chats'),
+    orderBy('updatedAt', 'desc'),
+  );
+  const snap = await getDocs(q);
+
+  return snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      title: data.title ?? 'New Conversation',
+      messages: (data.messages ?? []) as Message[],
+    };
+  });
+}
+
+async function saveChat(uid: string, chat: Chat) {
+  await setDoc(
+    doc(db, 'users', uid, 'chats', chat.id),
+    {
+      title: chat.title,
+      messages: chat.messages,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+async function removeChat(uid: string, chatId: string) {
+  await deleteDoc(doc(db, 'users', uid, 'chats', chatId));
+}
 
 function App() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -77,12 +121,27 @@ function App() {
     agentMessage: '#18181b',
   };
 
-  //Listen for login state
+  // Listen for login state + load/clear chats
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
+
+      if (currentUser) {
+        try {
+          const userChats = await loadUserChats(currentUser.uid);
+          setChats(userChats);
+        } catch (error) {
+          console.error('Failed to load chats:', error);
+          setChats([]);
+        }
+        setCurrentChatId(null);
+      } else {
+        setChats([]);
+        setCurrentChatId(null);
+      }
     });
+
     return () => unsubscribe();
   }, []);
   const handleGoogleLogin = async () => {
@@ -101,28 +160,6 @@ function App() {
       console.error('Logout failed:', error);
     }
   };
-
-  // Load saved data → always start on welcome screen
-  useEffect(() => {
-    try {
-      const savedChats = localStorage.getItem('jeeChats');
-
-      if (savedChats) {
-        const parsed = JSON.parse(savedChats) as Chat[];
-        if (Array.isArray(parsed)) {
-          setChats(parsed);
-        }
-      }
-
-      setCurrentChatId(null);
-    } catch (error) {
-      console.error('Failed to load saved data:', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('jeeChats', JSON.stringify(chats));
-  }, [chats]);
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -160,7 +197,6 @@ function App() {
     inputRef.current?.focus();
   };
 
-  // Delete chat → open next available
   const deleteChat = (chatId: string) => {
     setChats((prev) => {
       const updated = prev.filter((c) => c.id !== chatId);
@@ -171,6 +207,10 @@ function App() {
 
       return updated;
     });
+    
+    if (user) {
+      void removeChat(user.uid, chatId);
+    }
   };
 
   const selectPrompt = (prompt: string) => {
