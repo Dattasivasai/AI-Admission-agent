@@ -655,13 +655,13 @@ function App() {
           style={{
             height: '64px',
             minHeight: '64px',
-            padding: '0 22px',
+            padding: isMobile ? '0 12px' : '0 22px',
             background: colors.sidebarBackground,
             borderBottom: `1px solid ${colors.border}`,
             display: 'grid',
             gridTemplateColumns: '1fr auto',
             alignItems: 'center',
-            gap: '18px',
+            gap: isMobile ? '8px' : '18px',
           }}
         >
           {/* Left */}
@@ -687,16 +687,20 @@ function App() {
             </button>
 
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '15px', fontWeight: 650 }}>Admission Assistant</div>
-              <div style={{ marginTop: '2px', color: colors.textMuted, fontSize: '11px' }}>
-                Personalized admission guidance
+              <div style={{ fontSize: isMobile ? '14px' : '15px', fontWeight: 650 }}>
+                {isMobile ? 'AI Counselor' : 'Admission Assistant'}
               </div>
+              {!isMobile && (
+                <div style={{ marginTop: '2px', color: colors.textMuted, fontSize: '11px' }}>
+                  Personalized admission guidance
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Right */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button
+            {/* Right */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
+              {/* <button
               type="button"
               style={{
                 ...buttonReset,
@@ -711,186 +715,188 @@ function App() {
               }}
             >
               Model: llama-3.3-70b
-            </button>
+            </button> */}
 
-            {authLoading ? null : user ? (
-              <div style={{ position: 'relative' }} data-profile-menu>
-                {/* Clickable profile area */}
+              {authLoading ? null : user ? (
+                <div style={{ position: 'relative' }} data-profile-menu>
+                  {/* Clickable profile area */}
+                  <button
+                    type="button"
+                    onClick={() => setProfileOpen((p) => !p)}
+                    style={{
+                      ...buttonReset,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '4px 8px 4px 4px',
+                      borderRadius: '999px',
+                      background: profileOpen ? colors.elevatedBackground : 'transparent',
+                      border: `1px solid ${profileOpen ? colors.border : 'transparent'}`,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {user.photoURL ? (
+                      <img
+                        src={user.photoURL}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        style={{
+                          width: '28px',
+                          height: '28px',
+                          borderRadius: '50%',
+                          objectFit: 'cover',
+                        }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: '28px',
+                          height: '28px',
+                          borderRadius: '50%',
+                          background: colors.elevatedBackground,
+                          border: `1px solid ${colors.border}`,
+                          display: 'grid',
+                          placeItems: 'center',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          color: colors.textSecondary,
+                        }}
+                      >
+                        {(user.displayName || user.email || '?')[0].toUpperCase()}
+                      </div>
+                    )}
+
+                    {!isMobile && (
+                      <span
+                        style={{
+                          fontSize: '13px',
+                          color: colors.textSecondary,
+                          maxWidth: '120px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {user.displayName || user.email}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Dropdown */}
+                  {profileOpen && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 8px)',
+                        right: 0,
+                        minWidth: '180px',
+                        background: colors.elevatedBackground,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: '12px',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                        padding: '6px',
+                        zIndex: 50,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          // TODO: open help
+                        }}
+                        style={{
+                          ...buttonReset,
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          color: colors.textPrimary,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          background: 'transparent',
+                        }}
+                      >
+                        Help
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          // TODO: open settings
+                        }}
+                        style={{
+                          ...buttonReset,
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          color: colors.textPrimary,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          background: 'transparent',
+                        }}
+                      >
+                        Settings
+                      </button>
+
+                      <div style={{ height: '1px', background: colors.border, margin: '4px 0' }} />
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          handleLogout();
+                        }}
+                        style={{
+                          ...buttonReset,
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          color: '#ef4444',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          background: 'transparent',
+                        }}
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => setProfileOpen((p) => !p)}
+                  onClick={handleGoogleLogin}
                   style={{
                     ...buttonReset,
+                    padding: '8px 14px',
+                    borderRadius: '999px',
+                    background: '#fff',
+                    border: '1px solid #dadce0',
+                    color: '#3c4043',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    padding: '4px 8px 4px 4px',
-                    borderRadius: '999px',
-                    background: profileOpen ? colors.elevatedBackground : 'transparent',
-                    border: `1px solid ${profileOpen ? colors.border : 'transparent'}`,
-                    cursor: 'pointer',
                   }}
                 >
-                  {user.photoURL ? (
-                    <img
-                      src={user.photoURL}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      style={{
-                        width: '28px',
-                        height: '28px',
-                        borderRadius: '50%',
-                        objectFit: 'cover',
-                      }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: '28px',
-                        height: '28px',
-                        borderRadius: '50%',
-                        background: colors.elevatedBackground,
-                        border: `1px solid ${colors.border}`,
-                        display: 'grid',
-                        placeItems: 'center',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        color: colors.textSecondary,
-                      }}
-                    >
-                      {(user.displayName || user.email || '?')[0].toUpperCase()}
-                    </div>
-                  )}
-
-                  <span
-                    style={{
-                      fontSize: '13px',
-                      color: colors.textSecondary,
-                      maxWidth: '120px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {user.displayName || user.email}
-                  </span>
+                  <img
+                    src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                    alt=""
+                    width="16"
+                    height="16"
+                  />
+                  Sign in with Google
                 </button>
-
-                {/* Dropdown */}
-                {profileOpen && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 8px)',
-                      right: 0,
-                      minWidth: '180px',
-                      background: colors.elevatedBackground,
-                      border: `1px solid ${colors.border}`,
-                      borderRadius: '12px',
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                      padding: '6px',
-                      zIndex: 50,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        // TODO: open help
-                      }}
-                      style={{
-                        ...buttonReset,
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        color: colors.textPrimary,
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        background: 'transparent',
-                      }}
-                    >
-                      Help
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        // TODO: open settings
-                      }}
-                      style={{
-                        ...buttonReset,
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        color: colors.textPrimary,
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        background: 'transparent',
-                      }}
-                    >
-                      Settings
-                    </button>
-
-                    <div style={{ height: '1px', background: colors.border, margin: '4px 0' }} />
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        handleLogout();
-                      }}
-                      style={{
-                        ...buttonReset,
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        color: '#ef4444',
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        background: 'transparent',
-                      }}
-                    >
-                      Logout
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                style={{
-                  ...buttonReset,
-                  padding: '8px 14px',
-                  borderRadius: '999px',
-                  background: '#fff',
-                  border: '1px solid #dadce0',
-                  color: '#3c4043',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <img
-                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-                  alt=""
-                  width="16"
-                  height="16"
-                />
-                Sign in with Google
-              </button>
-            )}
-          </div>
+              )}
+            </div>
         </header>
         <div
           ref={chatContainerRef}
