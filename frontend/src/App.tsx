@@ -207,7 +207,7 @@ function App() {
 
       return updated;
     });
-    
+
     if (user) {
       void removeChat(user.uid, chatId);
     }
@@ -354,9 +354,11 @@ function App() {
       }
 
       // Final update (make sure last tokens are shown)
+      // Final update + persist for logged-in users
+      // Final update + persist for logged-in users
       if (fullContent) {
-        setChats((prev) =>
-          prev.map((chat) => {
+        setChats((prev) => {
+          const next = prev.map((chat) => {
             if (chat.id !== chatIdToUse) return chat;
 
             const msgs = [...chat.messages];
@@ -367,8 +369,17 @@ function App() {
             }
 
             return { ...chat, messages: msgs };
-          }),
-        );
+          });
+
+          if (user && chatIdToUse) {
+            const updatedChat = next.find((c) => c.id === chatIdToUse);
+            if (updatedChat) {
+              void saveChat(user.uid, updatedChat);
+            }
+          }
+
+          return next;
+        });
       }
     } catch (error) {
       console.error('Streaming error:', error);
@@ -377,8 +388,8 @@ function App() {
         error instanceof Error ? error.message : 'Unknown server error';
 
       // Rollback optimistic agent message → show error instead
-      setChats((prev) =>
-        prev.map((chat) => {
+      setChats((prev) => {
+        const next = prev.map((chat) => {
           if (chat.id !== chatIdToUse) return chat;
 
           const msgs = [...chat.messages];
@@ -391,10 +402,17 @@ function App() {
           }
 
           return { ...chat, messages: msgs };
-        }),
-      );
-    } finally {
-      setIsLoading(false);
+        });
+
+        if (user && chatIdToUse) {
+          const updatedChat = next.find((c) => c.id === chatIdToUse);
+          if (updatedChat) {
+            void saveChat(user.uid, updatedChat);
+          }
+        }
+
+        return next;
+      });
     }
   };
 
@@ -422,721 +440,721 @@ function App() {
         overflow: 'hidden',
       }}
     >
-      {/* ====================== SIDEBAR ====================== */}
-      <aside
-        style={{
-          width: sidebarOpen ? '248px' : '0',
-          minWidth: sidebarOpen ? '248px' : '0',
-          overflow: 'hidden',
-          background: colors.sidebarBackground,
-          borderRight: sidebarOpen ? `1px solid ${colors.border}` : 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          transition: 'width 0.2s ease, min-width 0.2s ease',
-        }}
-      >
-        <div
-          style={{
-            height: '64px',
-            padding: '0 18px',
-            display: 'flex',
-            alignItems: 'center',
-            borderBottom: `1px solid ${colors.border}`,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          <div
+          {/* ====================== SIDEBAR ====================== */}
+          <aside
             style={{
-              width: '34px',
-              height: '34px',
-              display: 'grid',
-              placeItems: 'center',
-              borderRadius: '10px',
-              marginRight: '10px',
-              background: colors.accentSoft,
-              fontSize: '19px',
+              width: sidebarOpen ? '248px' : '0',
+              minWidth: sidebarOpen ? '248px' : '0',
+              overflow: 'hidden',
+              background: colors.sidebarBackground,
+              borderRight: sidebarOpen ? `1px solid ${colors.border}` : 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              transition: 'width 0.2s ease, min-width 0.2s ease',
             }}
           >
-            🎓
-          </div>
-          <div style={{ fontSize: '17px', fontWeight: 700 }}>AI Counselor</div>
-        </div>
-
-        <div style={{ padding: '14px 12px 10px' }}>
-          <button
-            type="button"
-            onClick={startNewChat}
-            style={{
-              ...buttonReset,
-              width: '100%',
-              minHeight: '42px',
-              padding: '10px 14px',
-              borderRadius: '10px',
-              background: colors.elevatedBackground,
-              border: `1px solid ${colors.border}`,
-              color: colors.textPrimary,
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            ＋ New chat
-          </button>
-        </div>
-
-        <div
-          style={{
-            padding: '14px 18px 8px',
-            color: colors.textMuted,
-            fontSize: '12px',
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-          }}
-        >
-          Recent chats
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
-          {chats.length === 0 ? (
-            <div style={{ padding: '14px 10px', color: colors.textMuted, fontSize: '13px' }}>
-              Your conversations will appear here.
-            </div>
-          ) : (
-            chats.map((chat) => {
-              const isActive = chat.id === currentChatId;
-              const isHovered = hoveredChatId === chat.id;
-
-              return (
-                <div
-                  key={chat.id}
-                  onMouseEnter={() => setHoveredChatId(chat.id)}
-                  onMouseLeave={() => setHoveredChatId(null)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: '4px',
-                    borderRadius: '9px',
-                    background: isActive ? colors.accentSoft : 'transparent',
-                    borderLeft: isActive
-                      ? `3px solid ${colors.accent}`
-                      : '3px solid transparent',
-                    paddingRight: '4px',
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setCurrentChatId(chat.id)}
-                    title={chat.title}
-                    style={{
-                      ...buttonReset,
-                      flex: 1,
-                      padding: '11px 12px',
-                      paddingRight: '8px',
-                      background: 'transparent',
-                      color: isActive ? colors.textPrimary : colors.textSecondary,
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: '13px',
-                      fontWeight: isActive ? 600 : 500,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {chat.title}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (window.confirm('Delete this chat?')) {
-                        deleteChat(chat.id);
-                      }
-                    }}
-                    title="Delete chat"
-                    style={{
-                      ...buttonReset,
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '7px',
-                      background: 'transparent',
-                      color: colors.textMuted,
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      display: 'grid',
-                      placeItems: 'center',
-                      flexShrink: 0,
-                      opacity: isHovered || isActive ? 0.85 : 0,
-                      transition: 'opacity 0.15s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.18)';
-                      e.currentTarget.style.color = '#ef4444';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent';
-                      e.currentTarget.style.color = colors.textMuted;
-                    }}
-                  >
-                    🗑
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </aside>
-
-      {/* ====================== MAIN ====================== */}
-      <main
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          background: colors.mainBackground,
-        }}
-      >
-        <header
-          style={{
-            height: '64px',
-            minHeight: '64px',
-            padding: '0 22px',
-            background: colors.sidebarBackground,
-            borderBottom: `1px solid ${colors.border}`,
-            display: 'grid',
-            gridTemplateColumns: '1fr auto',
-            alignItems: 'center',
-            gap: '18px',
-          }}
-        >
-          {/* Left */}
-          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button
-              type="button"
-              onClick={() => setSidebarOpen((p) => !p)}
-              style={{
-                ...buttonReset,
-                width: '36px',
-                height: '36px',
-                display: 'grid',
-                placeItems: 'center',
-                borderRadius: '9px',
-                background: colors.elevatedBackground,
-                border: `1px solid ${colors.border}`,
-                color: colors.textSecondary,
-                cursor: 'pointer',
-                fontSize: '16px',
-              }}
-            >
-              {sidebarOpen ? '←' : '☰'}
-            </button>
-
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '15px', fontWeight: 650 }}>Admission Assistant</div>
-              <div style={{ marginTop: '2px', color: colors.textMuted, fontSize: '11px' }}>
-                Personalized admission guidance
-              </div>
-            </div>
-          </div>
-
-          {/* Right */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button
-              type="button"
-              style={{
-                ...buttonReset,
-                padding: '8px 12px',
-                borderRadius: '999px',
-                background: colors.elevatedBackground,
-                border: `1px solid ${colors.border}`,
-                color: colors.textSecondary,
-                fontSize: '12px',
-                fontWeight: 600,
-                cursor: 'default',
-              }}
-            >
-              Model: llama-3.3-70b
-            </button>
-
-            {authLoading ? null : user ? (
-              <div style={{ position: 'relative' }} data-profile-menu>
-                {/* Clickable profile area */}
-                <button
-                  type="button"
-                  onClick={() => setProfileOpen((p) => !p)}
-                  style={{
-                    ...buttonReset,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '4px 8px 4px 4px',
-                    borderRadius: '999px',
-                    background: profileOpen ? colors.elevatedBackground : 'transparent',
-                    border: `1px solid ${profileOpen ? colors.border : 'transparent'}`,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {user.photoURL ? (
-                    <img
-                      src={user.photoURL}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      style={{
-                        width: '28px',
-                        height: '28px',
-                        borderRadius: '50%',
-                        objectFit: 'cover',
-                      }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: '28px',
-                        height: '28px',
-                        borderRadius: '50%',
-                        background: colors.elevatedBackground,
-                        border: `1px solid ${colors.border}`,
-                        display: 'grid',
-                        placeItems: 'center',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        color: colors.textSecondary,
-                      }}
-                    >
-                      {(user.displayName || user.email || '?')[0].toUpperCase()}
-                    </div>
-                  )}
-
-                  <span
-                    style={{
-                      fontSize: '13px',
-                      color: colors.textSecondary,
-                      maxWidth: '120px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {user.displayName || user.email}
-                  </span>
-                </button>
-
-                {/* Dropdown */}
-                {profileOpen && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 8px)',
-                      right: 0,
-                      minWidth: '180px',
-                      background: colors.elevatedBackground,
-                      border: `1px solid ${colors.border}`,
-                      borderRadius: '12px',
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                      padding: '6px',
-                      zIndex: 50,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        // TODO: open help
-                      }}
-                      style={{
-                        ...buttonReset,
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        color: colors.textPrimary,
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        background: 'transparent',
-                      }}
-                    >
-                      Help
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        // TODO: open settings
-                      }}
-                      style={{
-                        ...buttonReset,
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        color: colors.textPrimary,
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        background: 'transparent',
-                      }}
-                    >
-                      Settings
-                    </button>
-
-                    <div style={{ height: '1px', background: colors.border, margin: '4px 0' }} />
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        handleLogout();
-                      }}
-                      style={{
-                        ...buttonReset,
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        color: '#ef4444',
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        background: 'transparent',
-                      }}
-                    >
-                      Logout
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                style={{
-                  ...buttonReset,
-                  padding: '8px 14px',
-                  borderRadius: '999px',
-                  background: '#fff',
-                  border: '1px solid #dadce0',
-                  color: '#3c4043',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <img
-                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-                  alt=""
-                  width="16"
-                  height="16"
-                />
-                Sign in with Google
-              </button>
-            )}
-          </div>
-        </header>
-        <div
-          ref={chatContainerRef}
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            background: colors.mainBackground,
-          }}
-        >
-          {!hasMessages ? (
             <div
               style={{
-                width: '100%',
-                minHeight: '100%',
-                padding: '70px 24px 48px',
-                boxSizing: 'border-box',
+                height: '64px',
+                padding: '0 18px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
+                borderBottom: `1px solid ${colors.border}`,
+                whiteSpace: 'nowrap',
               }}
             >
               <div
                 style={{
-                  width: '100%',
-                  maxWidth: '760px',
-                  textAlign: 'center',
-                  transform: 'translateY(-28px)',
+                  width: '34px',
+                  height: '34px',
+                  display: 'grid',
+                  placeItems: 'center',
+                  borderRadius: '10px',
+                  marginRight: '10px',
+                  background: colors.accentSoft,
+                  fontSize: '19px',
                 }}
               >
-                <div
-                  style={{
-                    width: '58px',
-                    height: '58px',
-                    margin: '0 auto 22px',
-                    borderRadius: '18px',
-                    display: 'grid',
-                    placeItems: 'center',
-                    background: colors.accentSoft,
-                    border: '1px solid rgba(124, 58, 237, 0.25)',
-                    fontSize: '27px',
-                  }}
-                >
-                  ✦
-                </div>
-
-                <h1
-                  style={{
-                    margin: 0,
-                    fontSize: 'clamp(27px, 4vw, 36px)',
-                    lineHeight: 1.2,
-                    letterSpacing: '-0.04em',
-                    fontWeight: 750,
-                  }}
-                >
-                  Plan your JEE admission journey
-                </h1>
-
-                <p
-                  style={{
-                    maxWidth: '620px',
-                    margin: '16px auto 0',
-                    color: colors.textSecondary,
-                    fontSize: '16px',
-                    lineHeight: 1.7,
-                  }}
-                >
-                  Get personalized guidance about JoSAA cutoffs, colleges,
-                  branches and admission possibilities based on your rank.
-                </p>
-
-                <div
-                  style={{
-                    marginTop: '32px',
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-                    gap: '12px',
-                  }}
-                >
-                  {EXAMPLE_PROMPTS.map((prompt) => (
-                    <button
-                      type="button"
-                      key={prompt}
-                      onClick={() => selectPrompt(prompt)}
-                      style={{
-                        ...buttonReset,
-                        minHeight: '88px',
-                        padding: '15px',
-                        borderRadius: '14px',
-                        background: colors.elevatedBackground,
-                        border: `1px solid ${colors.border}`,
-                        color: colors.textSecondary,
-                        textAlign: 'left',
-                        fontSize: '13px',
-                        lineHeight: 1.55,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <span
-                        style={{
-                          display: 'block',
-                          marginBottom: '7px',
-                          color: colors.accent,
-                          fontSize: '16px',
-                        }}
-                      >
-                        ↗
-                      </span>
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
+                🎓
               </div>
+              <div style={{ fontSize: '17px', fontWeight: 700 }}>AI Counselor</div>
             </div>
-          ) : (
-            <div
-              style={{
-                width: '100%',
-                maxWidth: '900px',
-                minHeight: '100%',
-                margin: '0 auto',
-                padding: '36px 24px 48px',
-                boxSizing: 'border-box',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '24px',
-              }}
-            >
-              {currentChat?.messages.map((message, index) => {
-                const isUser = message.role === 'user';
-                const isLast = index === (currentChat?.messages.length ?? 0) - 1;
 
-                return (
-                  <div
-                    key={`${message.role}-${index}`}
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      justifyContent: isUser ? 'flex-end' : 'flex-start',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        flexDirection: isUser ? 'row-reverse' : 'row',
-                        gap: '10px',
-                        maxWidth: '84%',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: '30px',
-                          height: '30px',
-                          flexShrink: 0,
-                          display: 'grid',
-                          placeItems: 'center',
-                          borderRadius: '9px',
-                          background: isUser
-                            ? colors.accent
-                            : colors.elevatedBackground,
-                          border: `1px solid ${colors.border}`,
-                          color: isUser ? '#ffffff' : colors.textPrimary,
-                          fontSize: '13px',
-                          fontWeight: 700,
-                        }}
-                      >
-                        {isUser ? 'Y' : 'AI'}
-                      </div>
-
-                      <div
-                        style={{
-                          padding: '13px 17px',
-                          borderRadius: isUser
-                            ? '16px 5px 16px 16px'
-                            : '5px 16px 16px 16px',
-                          background: isUser
-                            ? colors.accent
-                            : colors.agentMessage,
-                          border: isUser ? 'none' : `1px solid ${colors.border}`,
-                          color: isUser ? '#ffffff' : colors.textPrimary,
-                          fontSize: '14px',
-                          lineHeight: 1.7,
-                          whiteSpace: 'pre-wrap',
-                          overflowWrap: 'anywhere',
-                          boxShadow: isUser
-                            ? '0 8px 25px rgba(124, 58, 237, 0.16)'
-                            : 'none',
-                        }}
-                      >
-                        {message.content}
-
-                        {isLoading && isLast && message.role === 'agent' && (
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              width: '7px',
-                              height: '14px',
-                              background: colors.accent,
-                              marginLeft: '2px',
-                              verticalAlign: 'middle',
-                              animation: 'blink 1s step-end infinite',
-                            }}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Input */}
-        <div style={{ padding: '14px 24px 22px', background: colors.mainBackground }}>
-          <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '7px',
-                borderRadius: '18px',
-                background: colors.inputBackground,
-                border: `1px solid ${colors.border}`,
-                boxShadow: '0 12px 35px rgba(0, 0, 0, 0.28)',
-              }}
-            >
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleInputKeyDown}
-                placeholder="Ask about rank, college, branch or cutoffs..."
-                disabled={isLoading}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  padding: '12px 14px',
-                  border: 'none',
-                  outline: 'none',
-                  background: 'transparent',
-                  color: colors.textPrimary,
-                  fontFamily: 'inherit',
-                  fontSize: '14px',
-                }}
-              />
-
+            <div style={{ padding: '14px 12px 10px' }}>
               <button
                 type="button"
-                onClick={() => void sendMessage()}
-                disabled={!input.trim() || isLoading}
+                onClick={startNewChat}
                 style={{
                   ...buttonReset,
-                  minWidth: '94px',
-                  height: '42px',
-                  padding: '0 20px',
-                  borderRadius: '12px',
-                  background:
-                    !input.trim() || isLoading
-                      ? colors.elevatedBackground
-                      : colors.accent,
-                  color:
-                    !input.trim() || isLoading ? colors.textMuted : '#ffffff',
+                  width: '100%',
+                  minHeight: '42px',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  background: colors.elevatedBackground,
+                  border: `1px solid ${colors.border}`,
+                  color: colors.textPrimary,
                   fontSize: '14px',
-                  fontWeight: 700,
-                  cursor: !input.trim() || isLoading ? 'not-allowed' : 'pointer',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textAlign: 'left',
                 }}
               >
-                {isLoading ? '...' : 'Send'}
+                ＋ New chat
               </button>
             </div>
 
             <div
               style={{
-                marginTop: '9px',
+                padding: '14px 18px 8px',
                 color: colors.textMuted,
-                fontSize: '11px',
-                textAlign: 'center',
+                fontSize: '12px',
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
               }}
             >
-              AI recommendations may not always match the official JoSAA results.
-              Verify important admission information.
+              Recent chats
             </div>
-          </div>
-        </div>
-      </main>
 
-      <style>{`
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
+              {chats.length === 0 ? (
+                <div style={{ padding: '14px 10px', color: colors.textMuted, fontSize: '13px' }}>
+                  Your conversations will appear here.
+                </div>
+              ) : (
+                chats.map((chat) => {
+                  const isActive = chat.id === currentChatId;
+                  const isHovered = hoveredChatId === chat.id;
+
+                  return (
+                    <div
+                      key={chat.id}
+                      onMouseEnter={() => setHoveredChatId(chat.id)}
+                      onMouseLeave={() => setHoveredChatId(null)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: '4px',
+                        borderRadius: '9px',
+                        background: isActive ? colors.accentSoft : 'transparent',
+                        borderLeft: isActive
+                          ? `3px solid ${colors.accent}`
+                          : '3px solid transparent',
+                        paddingRight: '4px',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setCurrentChatId(chat.id)}
+                        title={chat.title}
+                        style={{
+                          ...buttonReset,
+                          flex: 1,
+                          padding: '11px 12px',
+                          paddingRight: '8px',
+                          background: 'transparent',
+                          color: isActive ? colors.textPrimary : colors.textSecondary,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontSize: '13px',
+                          fontWeight: isActive ? 600 : 500,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {chat.title}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('Delete this chat?')) {
+                            deleteChat(chat.id);
+                          }
+                        }}
+                        title="Delete chat"
+                        style={{
+                          ...buttonReset,
+                          width: '28px',
+                          height: '28px',
+                          borderRadius: '7px',
+                          background: 'transparent',
+                          color: colors.textMuted,
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          display: 'grid',
+                          placeItems: 'center',
+                          flexShrink: 0,
+                          opacity: isHovered || isActive ? 0.85 : 0,
+                          transition: 'opacity 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.18)';
+                          e.currentTarget.style.color = '#ef4444';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.color = colors.textMuted;
+                        }}
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+
+          {/* ====================== MAIN ====================== */}
+          <main
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              background: colors.mainBackground,
+            }}
+          >
+            <header
+              style={{
+                height: '64px',
+                minHeight: '64px',
+                padding: '0 22px',
+                background: colors.sidebarBackground,
+                borderBottom: `1px solid ${colors.border}`,
+                display: 'grid',
+                gridTemplateColumns: '1fr auto',
+                alignItems: 'center',
+                gap: '18px',
+              }}
+            >
+              {/* Left */}
+              <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen((p) => !p)}
+                  style={{
+                    ...buttonReset,
+                    width: '36px',
+                    height: '36px',
+                    display: 'grid',
+                    placeItems: 'center',
+                    borderRadius: '9px',
+                    background: colors.elevatedBackground,
+                    border: `1px solid ${colors.border}`,
+                    color: colors.textSecondary,
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                  }}
+                >
+                  {sidebarOpen ? '←' : '☰'}
+                </button>
+
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: '15px', fontWeight: 650 }}>Admission Assistant</div>
+                  <div style={{ marginTop: '2px', color: colors.textMuted, fontSize: '11px' }}>
+                    Personalized admission guidance
+                  </div>
+                </div>
+              </div>
+
+              {/* Right */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  style={{
+                    ...buttonReset,
+                    padding: '8px 12px',
+                    borderRadius: '999px',
+                    background: colors.elevatedBackground,
+                    border: `1px solid ${colors.border}`,
+                    color: colors.textSecondary,
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'default',
+                  }}
+                >
+                  Model: llama-3.3-70b
+                </button>
+
+                {authLoading ? null : user ? (
+                  <div style={{ position: 'relative' }} data-profile-menu>
+                    {/* Clickable profile area */}
+                    <button
+                      type="button"
+                      onClick={() => setProfileOpen((p) => !p)}
+                      style={{
+                        ...buttonReset,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '4px 8px 4px 4px',
+                        borderRadius: '999px',
+                        background: profileOpen ? colors.elevatedBackground : 'transparent',
+                        border: `1px solid ${profileOpen ? colors.border : 'transparent'}`,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {user.photoURL ? (
+                        <img
+                          src={user.photoURL}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          style={{
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            objectFit: 'cover',
+                          }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            background: colors.elevatedBackground,
+                            border: `1px solid ${colors.border}`,
+                            display: 'grid',
+                            placeItems: 'center',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          {(user.displayName || user.email || '?')[0].toUpperCase()}
+                        </div>
+                      )}
+
+                      <span
+                        style={{
+                          fontSize: '13px',
+                          color: colors.textSecondary,
+                          maxWidth: '120px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {user.displayName || user.email}
+                      </span>
+                    </button>
+
+                    {/* Dropdown */}
+                    {profileOpen && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 'calc(100% + 8px)',
+                          right: 0,
+                          minWidth: '180px',
+                          background: colors.elevatedBackground,
+                          border: `1px solid ${colors.border}`,
+                          borderRadius: '12px',
+                          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                          padding: '6px',
+                          zIndex: 50,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProfileOpen(false);
+                            // TODO: open help
+                          }}
+                          style={{
+                            ...buttonReset,
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            color: colors.textPrimary,
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            background: 'transparent',
+                          }}
+                        >
+                          Help
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProfileOpen(false);
+                            // TODO: open settings
+                          }}
+                          style={{
+                            ...buttonReset,
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            color: colors.textPrimary,
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            background: 'transparent',
+                          }}
+                        >
+                          Settings
+                        </button>
+
+                        <div style={{ height: '1px', background: colors.border, margin: '4px 0' }} />
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProfileOpen(false);
+                            handleLogout();
+                          }}
+                          style={{
+                            ...buttonReset,
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            color: '#ef4444',
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            background: 'transparent',
+                          }}
+                        >
+                          Logout
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    style={{
+                      ...buttonReset,
+                      padding: '8px 14px',
+                      borderRadius: '999px',
+                      background: '#fff',
+                      border: '1px solid #dadce0',
+                      color: '#3c4043',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <img
+                      src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                      alt=""
+                      width="16"
+                      height="16"
+                    />
+                    Sign in with Google
+                  </button>
+                )}
+              </div>
+            </header>
+            <div
+              ref={chatContainerRef}
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                background: colors.mainBackground,
+              }}
+            >
+              {!hasMessages ? (
+                <div
+                  style={{
+                    width: '100%',
+                    minHeight: '100%',
+                    padding: '70px 24px 48px',
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      maxWidth: '760px',
+                      textAlign: 'center',
+                      transform: 'translateY(-28px)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '58px',
+                        height: '58px',
+                        margin: '0 auto 22px',
+                        borderRadius: '18px',
+                        display: 'grid',
+                        placeItems: 'center',
+                        background: colors.accentSoft,
+                        border: '1px solid rgba(124, 58, 237, 0.25)',
+                        fontSize: '27px',
+                      }}
+                    >
+                      ✦
+                    </div>
+
+                    <h1
+                      style={{
+                        margin: 0,
+                        fontSize: 'clamp(27px, 4vw, 36px)',
+                        lineHeight: 1.2,
+                        letterSpacing: '-0.04em',
+                        fontWeight: 750,
+                      }}
+                    >
+                      Plan your JEE admission journey
+                    </h1>
+
+                    <p
+                      style={{
+                        maxWidth: '620px',
+                        margin: '16px auto 0',
+                        color: colors.textSecondary,
+                        fontSize: '16px',
+                        lineHeight: 1.7,
+                      }}
+                    >
+                      Get personalized guidance about JoSAA cutoffs, colleges,
+                      branches and admission possibilities based on your rank.
+                    </p>
+
+                    <div
+                      style={{
+                        marginTop: '32px',
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+                        gap: '12px',
+                      }}
+                    >
+                      {EXAMPLE_PROMPTS.map((prompt) => (
+                        <button
+                          type="button"
+                          key={prompt}
+                          onClick={() => selectPrompt(prompt)}
+                          style={{
+                            ...buttonReset,
+                            minHeight: '88px',
+                            padding: '15px',
+                            borderRadius: '14px',
+                            background: colors.elevatedBackground,
+                            border: `1px solid ${colors.border}`,
+                            color: colors.textSecondary,
+                            textAlign: 'left',
+                            fontSize: '13px',
+                            lineHeight: 1.55,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: 'block',
+                              marginBottom: '7px',
+                              color: colors.accent,
+                              fontSize: '16px',
+                            }}
+                          >
+                            ↗
+                          </span>
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    width: '100%',
+                    maxWidth: '900px',
+                    minHeight: '100%',
+                    margin: '0 auto',
+                    padding: '36px 24px 48px',
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '24px',
+                  }}
+                >
+                  {currentChat?.messages.map((message, index) => {
+                    const isUser = message.role === 'user';
+                    const isLast = index === (currentChat?.messages.length ?? 0) - 1;
+
+                    return (
+                      <div
+                        key={`${message.role}-${index}`}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          justifyContent: isUser ? 'flex-end' : 'flex-start',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            flexDirection: isUser ? 'row-reverse' : 'row',
+                            gap: '10px',
+                            maxWidth: '84%',
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              flexShrink: 0,
+                              display: 'grid',
+                              placeItems: 'center',
+                              borderRadius: '9px',
+                              background: isUser
+                                ? colors.accent
+                                : colors.elevatedBackground,
+                              border: `1px solid ${colors.border}`,
+                              color: isUser ? '#ffffff' : colors.textPrimary,
+                              fontSize: '13px',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {isUser ? 'Y' : 'AI'}
+                          </div>
+
+                          <div
+                            style={{
+                              padding: '13px 17px',
+                              borderRadius: isUser
+                                ? '16px 5px 16px 16px'
+                                : '5px 16px 16px 16px',
+                              background: isUser
+                                ? colors.accent
+                                : colors.agentMessage,
+                              border: isUser ? 'none' : `1px solid ${colors.border}`,
+                              color: isUser ? '#ffffff' : colors.textPrimary,
+                              fontSize: '14px',
+                              lineHeight: 1.7,
+                              whiteSpace: 'pre-wrap',
+                              overflowWrap: 'anywhere',
+                              boxShadow: isUser
+                                ? '0 8px 25px rgba(124, 58, 237, 0.16)'
+                                : 'none',
+                            }}
+                          >
+                            {message.content}
+
+                            {isLoading && isLast && message.role === 'agent' && (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  width: '7px',
+                                  height: '14px',
+                                  background: colors.accent,
+                                  marginLeft: '2px',
+                                  verticalAlign: 'middle',
+                                  animation: 'blink 1s step-end infinite',
+                                }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Input */}
+            <div style={{ padding: '14px 24px 22px', background: colors.mainBackground }}>
+              <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '7px',
+                    borderRadius: '18px',
+                    background: colors.inputBackground,
+                    border: `1px solid ${colors.border}`,
+                    boxShadow: '0 12px 35px rgba(0, 0, 0, 0.28)',
+                  }}
+                >
+                  <input
+                    ref={inputRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleInputKeyDown}
+                    placeholder="Ask about rank, college, branch or cutoffs..."
+                    disabled={isLoading}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: '12px 14px',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      color: colors.textPrimary,
+                      fontFamily: 'inherit',
+                      fontSize: '14px',
+                    }}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => void sendMessage()}
+                    disabled={!input.trim() || isLoading}
+                    style={{
+                      ...buttonReset,
+                      minWidth: '94px',
+                      height: '42px',
+                      padding: '0 20px',
+                      borderRadius: '12px',
+                      background:
+                        !input.trim() || isLoading
+                          ? colors.elevatedBackground
+                          : colors.accent,
+                      color:
+                        !input.trim() || isLoading ? colors.textMuted : '#ffffff',
+                      fontSize: '14px',
+                      fontWeight: 700,
+                      cursor: !input.trim() || isLoading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isLoading ? '...' : 'Send'}
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: '9px',
+                    color: colors.textMuted,
+                    fontSize: '11px',
+                    textAlign: 'center',
+                  }}
+                >
+                  AI recommendations may not always match the official JoSAA results.
+                  Verify important admission information.
+                </div>
+              </div>
+            </div>
+          </main>
+
+          <style>{`
         @keyframes blink {
           50% { opacity: 0; }
         }
       `}</style>
-    </div>
-  );
-}
+        </div>
+      );
+    }
 
-export default App;
+    export default App;
