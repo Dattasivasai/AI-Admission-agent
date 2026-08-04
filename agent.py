@@ -252,7 +252,7 @@ def search_josaa_cutoffs(
     gender: str = None,
     max_closing_rank: int = None,
     min_closing_rank: int = None,
-    limit: int = 25,
+    limit: int = 10,
 ) -> str:
     """
     Search real JoSAA opening & closing ranks (2016–2026).
@@ -363,7 +363,171 @@ def percentile_to_rank(percentile: float) -> str:
     return f"Approximate Rank ≈ {rank:,} for {percentile} percentile (rough estimate based on recent years)."
 
 
-tools = [search_josaa_cutoffs, percentile_to_rank]
+@tool
+def build_choice_list(
+    rank: int,
+    category: str,
+    gender: str,
+    courses: str,
+    quota_mode: str = "all_india",
+    order_style: str = "stronger_first",
+    max_choices: int = 50,
+) -> str:
+    """
+    Build a JoSAA-style preference choice list for a student.
+
+    Use when the user wants choice filling / preference order / which colleges
+    they can get for an ordered list of courses.
+
+    Parameters:
+    - rank: All India rank (required)
+    - category: OPEN, OBC-NCL, EWS, SC, ST, etc.
+    - gender: Gender-Neutral or Female-only (or Male → treat as Gender-Neutral)
+    - courses: ordered course list as comma-separated text, e.g. "CSE, ECE, IT"
+    - quota_mode: "all_india" (OS/AI focus) or "hs_first" (HS then OS)
+    - order_style: "stronger_first" (lower CR first among eligible) or "safer_first"
+    - max_choices: max rows in the final list (default 50)
+
+    Only uses recent years 2024–2026.
+    """
+    try:
+        # Input validation & normalization
+        max_choices = min(int(max_choices), 100)  # Cap at 100 rows
+        if rank <= 0 or rank > 2000000:
+            return "Invalid rank. Please provide a valid All India rank (1–2000000)."
+
+        df = JOSAA_DF.copy()
+        df = df[df["year"].isin([2024, 2025, 2026])]
+
+        # normalize gender
+        g = (gender or "").strip().lower()
+        if g in ("male", "m", "gender-neutral", "gender neutral", "gn"):
+            gender_filter = "Gender-Neutral"
+        elif "female" in g or "girls" in g:
+            gender_filter = "Female"
+        else:
+            gender_filter = gender
+
+        cat = (category or "OPEN").strip()
+
+        # parse courses
+        course_list = [c.strip() for c in courses.split(",") if c.strip()]
+        if not course_list:
+            return "No courses provided. Ask the user for course order, e.g. CSE, ECE, IT."
+
+        df = df[df["seat_type"].str.contains(cat, case=False, na=False)]
+        df = df[~df["seat_type"].str.contains("PwD", case=False, na=False)]
+        df = df[df["gender"].str.contains(gender_filter, case=False, na=False)]
+        df = df[df["closing_rank"] >= rank]
+
+        quota_mode = (quota_mode or "all_india").lower().strip()
+        order_style = (order_style or "stronger_first").lower().strip()
+
+        rows_out = []
+        seen = set()
+
+        for course in course_list:
+            if len(rows_out) >= max_choices:
+                break
+
+            prog_key = course.lower().strip()
+            resolved = PROGRAM_ALIASES.get(prog_key, course)
+            cdf = df[df["academic_program"].str.contains(resolved, case=False, na=False)]
+
+            if cdf.empty:
+                continue
+
+            # latest CR per institute+program+quota
+            cdf = cdf.sort_values(["year", "round"], ascending=[False, False])
+            latest = (
+                cdf.groupby(["institute", "academic_program", "quota"], as_index=False)
+                .first()
+            )
+
+            if quota_mode == "all_india":
+                # prefer OS/AI; still allow HS if no OS
+                os_ai = latest[latest["quota"].str.upper().isin(["OS", "AI"])]
+                hs = latest[latest["quota"].str.upper() == "HS"]
+                ordered_parts = [os_ai, hs]
+            else:  # hs_first
+                hs = latest[latest["quota"].str.upper() == "HS"]
+                os_ai = latest[latest["quota"].str.upper().isin(["OS", "AI"])]
+                other = latest[~latest["quota"].str.upper().isin(["HS", "OS", "AI"])]
+                ordered_parts = [hs, os_ai, other]
+
+            for part in ordered_parts:
+                if part.empty:
+                    continue
+                if order_style == "safer_first":
+                    part = part.sort_values("closing_rank", ascending=False)
+                else:
+                    part = part.sort_values("closing_rank", ascending=True)
+
+                for _, r in part.iterrows():
+                    key = (r["institute"], r["academic_program"], r["quota"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    cr = int(r["closing_rank"])
+                    # simple bands vs user rank
+                    if cr >= int(rank * 1.15):
+                        band = "Safe"
+                    elif cr >= rank:
+                        band = "Moderate"
+                    else:
+                        band = "Ambitious"
+
+                    rows_out.append(
+                        {
+                            "institute": r["institute"],
+                            "academic_program": r["academic_program"],
+                            "quota": r["quota"],
+                            "year": int(r["year"]),
+                            "round": int(r["round"]),
+                            "cr": cr,
+                            "band": band,
+                            "course": course,
+                        }
+                    )
+                    if len(rows_out) >= max_choices:
+                        break
+                if len(rows_out) >= max_choices:
+                    break
+
+        if not rows_out:
+            return (
+                "No matching programs found for the given rank/category/gender/courses "
+                "in 2024–2026 data. Ask user to relax course list or verify rank/category."
+            )
+
+        lines = [
+            f"Suggested JoSAA-style choice list | Rank={rank} | {cat} | {gender_filter}",
+            f"Courses order: {' → '.join(course_list)}",
+            f"Quota mode: {quota_mode} | Order: {order_style}",
+            f"Based on latest available rows in 2024–2026 (not a guarantee).",
+            "",
+            f"{'Choice No':<10} | {'Institute':<55} | {'Academic Program':<70} | Quota | Recent CR | Band",
+            "-" * 170,
+        ]
+        for i, row in enumerate(rows_out, start=1):
+            lines.append(
+                f"{i:<10} | {row['institute'][:55]:<55} | {row['academic_program'][:70]:<70} | "
+                f"{row['quota']:<5} | {row['cr']:<9} | {row['band']}"
+            )
+
+        lines.append("")
+        lines.append(
+            "User can reorder while filling. Stronger options are higher if order_style=stronger_first "
+            "so later rounds can only improve upward."
+        )
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error building choice list: {str(e)}"
+
+
+tools = [search_josaa_cutoffs, percentile_to_rank, build_choice_list]
 
 # ====================== LLM ======================
 
@@ -377,25 +541,41 @@ llm_with_tools = llm.bind_tools(tools)
 
 SYSTEM_PROMPT = """You are an expert JEE Main + JoSAA Admission Counselor with access to real historical cutoff data (2016–2026).
 
-STRICT RULES:
-1. For ANY question involving colleges, branches, cutoffs, ranks, categories, years, quotas, or "what can I get" → ALWAYS call the tool `search_josaa_cutoffs`.
-2. Never invent or guess cutoff numbers. Only use data returned by the tool.
-3. When a student gives a rank and asks "what can I get / which colleges can I get":
-   - ALWAYS call search_josaa_cutoffs with min_closing_rank = their rank
-   - Optionally filter by institute (e.g. institute="NIT" or institute="National Institute of Technology")
-   - Prefer recent years (2024 or 2025) and OPEN + Gender-Neutral if category/gender not specified
-4. Prefer showing recent years (2024–2026) and final rounds when possible.
-5. Be honest about data limitations. Data covers 2016–2026; treat recent years as more relevant for counselling.
-6. After getting tool results, give a clear, structured, helpful answer.
-7. For percentile → rank conversion use `percentile_to_rank`.
-8. When reporting cutoffs, ALWAYS mention:
-   - Year and Round
-   - Quota (OS / HS / AI)
-   - Category (OPEN / OBC-NCL / etc.)
-   - Gender
-   Never give a single number without these details.
+🔴 CRITICAL: TOOL ROUTING BY DETECTION (read carefully)
 
-Respond in a professional, honest, and student-friendly tone."""
+IF user says ANY of these (choice list / preference / form filling / college order):
+  - "choice list" OR "preference order" OR "what to fill" OR "college order" OR "build my choices" OR "JoSAA form" OR "form filling"
+  → ALWAYS use: build_choice_list
+  → NEVER use: search_josaa_cutoffs
+  → NEVER write prose—output ONLY a numbered table
+
+IF user asks about a single college/branch/NIT/IIT or general "what can I get":
+  → ALWAYS use: search_josaa_cutoffs
+  → Examples: "Can I get IIT Delhi CSE?" / "What NITs can I get?" / "Show CSE cutoffs"
+
+IF user mentions percentile without rank:
+  → Use: percentile_to_rank (approximate only)
+
+---
+
+🟡 For build_choice_list (choice list mode):
+- REQUIRED inputs: rank, category, gender, ordered courses (e.g., CSE, ECE)
+- If missing: ask for quota preference (HS first OR All-India) and order style (stronger first OR safer first)
+- Default if unclear: quota_mode=all_india, order_style=stronger_first
+- Gender mapping: "male" → Gender-Neutral; "female"/"girls" → Female
+- Call tool ONCE with all parameters
+- Output format: **NUMBERED TABLE** with Choice No | Institute | Academic Program | Quota | Recent CR | Band
+- NEVER prose, NEVER vague text
+
+🟢 For search_josaa_cutoffs (college query mode):
+- Parameter guidance: min_closing_rank = user's rank, year = 2025, category = OPEN (default)
+- institute = "National Institute of Technology" (for NITs) or "Indian Institute of Technology" (for IITs)
+- limit = 12, one call only
+- If no results and user hasn't specified year: don't retry years
+
+---
+
+TONE: Professional, direct, student-friendly. Prefer structured output."""
 
 
 def agent_node(state: AgentState):

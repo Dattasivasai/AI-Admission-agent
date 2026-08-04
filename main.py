@@ -59,6 +59,12 @@ async def chat(query: Query):
                         if content:
                             yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
+                    elif kind == "on_tool_start":
+                        yield f"data: {json.dumps({'type': 'status', 'content': 'Searching JoSAA cutoffs...'})}\n\n"
+
+                    elif kind == "on_tool_end":
+                        yield f"data: {json.dumps({'type': 'status', 'content': 'Writing answer...'})}\n\n"
+
                     # When the agent finishes
                     elif kind == "on_chat_model_end":
                         yield f"data: {json.dumps({'type': 'end'})}\n\n"

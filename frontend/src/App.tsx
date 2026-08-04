@@ -111,6 +111,7 @@ function App() {
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const currentChat = chats.find((chat) => chat.id === currentChatId);
   const hasMessages = Boolean(currentChat?.messages.length);
@@ -230,10 +231,41 @@ function App() {
     inputRef.current?.focus();
   };
 
+  const stopGenerating = () => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== currentChatId) return chat;
+        const msgs = [...chat.messages];
+        const last = msgs[msgs.length - 1];
+        if (
+          last?.role === 'agent' &&
+          (last.content === 'Thinking...' ||
+            last.content.startsWith('Searching') ||
+            last.content.startsWith('Writing'))
+        ) {
+          msgs[msgs.length - 1] = {
+            role: 'agent',
+            content: last.content === 'Thinking...' ? '(Stopped)' : last.content,
+          };
+        }
+        return { ...chat, messages: msgs };
+      }),
+    );
+
+    setIsLoading(false);
+  };
+
   // ====================== IMPROVED STREAMING ======================
   const sendMessage = async () => {
     const currentInput = input.trim();
     if (!currentInput || isLoading) return;
+
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setInput('');
     setIsLoading(true);
@@ -294,6 +326,7 @@ function App() {
           message: currentInput,
           history: previousMessages,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -326,6 +359,22 @@ function App() {
 
             try {
               const data = JSON.parse(line.slice(6));
+
+              if (data.type === 'status') {
+                const statusText = data.content || 'Working...';
+                setChats((prev) =>
+                  prev.map((chat) => {
+                    if (chat.id !== chatIdToUse) return chat;
+                    const msgs = [...chat.messages];
+                    const lastIdx = msgs.length - 1;
+                    if (msgs[lastIdx]?.role === 'agent') {
+                      msgs[lastIdx] = { role: 'agent', content: statusText };
+                    }
+                    return { ...chat, messages: msgs };
+                  }),
+                );
+                continue;
+              }
 
               if (data.type === 'token') {
                 fullContent += data.content;
@@ -394,6 +443,10 @@ function App() {
         });
       }
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return;
+      }
+
       console.error('Streaming error:', error);
 
       const errorText =
@@ -425,6 +478,11 @@ function App() {
 
         return next;
       });
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      setIsLoading(false);
     }
   };
 
@@ -1146,29 +1204,56 @@ function App() {
                 }}
               />
 
-              <button
-                type="button"
-                onClick={() => void sendMessage()}
-                disabled={!input.trim() || isLoading}
-                style={{
-                  ...buttonReset,
-                  minWidth: '94px',
-                  height: '42px',
-                  padding: '0 20px',
-                  borderRadius: '12px',
-                  background:
-                    !input.trim() || isLoading
-                      ? colors.elevatedBackground
-                      : colors.accent,
-                  color:
-                    !input.trim() || isLoading ? colors.textMuted : '#ffffff',
-                  fontSize: '14px',
-                  fontWeight: 700,
-                  cursor: !input.trim() || isLoading ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {isLoading ? '...' : 'Send'}
-              </button>
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={stopGenerating}
+                  title="Stop"
+                  style={{
+                    ...buttonReset,
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '12px',
+                    background: colors.elevatedBackground,
+                    border: `1px solid ${colors.border}`,
+                    color: colors.textPrimary,
+                    cursor: 'pointer',
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '2px',
+                      background: colors.textPrimary,
+                      display: 'block',
+                    }}
+                  />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void sendMessage()}
+                  disabled={!input.trim()}
+                  style={{
+                    ...buttonReset,
+                    minWidth: '94px',
+                    height: '42px',
+                    padding: '0 20px',
+                    borderRadius: '12px',
+                    background: !input.trim() ? colors.elevatedBackground : colors.accent,
+                    color: !input.trim() ? colors.textMuted : '#ffffff',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    cursor: !input.trim() ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Send
+                </button>
+              )}
             </div>
 
             <div
