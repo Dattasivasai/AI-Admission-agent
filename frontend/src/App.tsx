@@ -73,7 +73,9 @@ function App() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingChatId, setLoadingChatId] = useState<string | null>(null);
+
+  const isCurrentChatLoading = loadingChatId !== null && loadingChatId === currentChatId;
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 768 : true
   );
@@ -180,7 +182,7 @@ function App() {
         behavior: 'smooth',
       });
     }
-  }, [currentChat?.messages, isLoading]);
+  }, [currentChat?.messages, loadingChatId]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -255,20 +257,19 @@ function App() {
       }),
     );
 
-    setIsLoading(false);
+    setLoadingChatId(null);
   };
 
   // ====================== IMPROVED STREAMING ======================
   const sendMessage = async () => {
     const currentInput = input.trim();
-    if (!currentInput || isLoading) return;
+    if (!currentInput) return;
 
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     setInput('');
-    setIsLoading(true);
 
     const userMessage: Message = { role: 'user', content: currentInput };
     const optimisticAgentMessage: Message = {
@@ -314,6 +315,12 @@ function App() {
         ),
       );
     }
+
+    // Prevent double-send on the same chat
+    if (loadingChatId === chatIdToUse) return;
+
+    // mark this chat as loading (replaces global isLoading)
+    setLoadingChatId(chatIdToUse);
 
     // ========== NETWORK REQUEST ==========
     try {
@@ -482,7 +489,7 @@ function App() {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
-      setIsLoading(false);
+      setLoadingChatId(null);
     }
   };
 
@@ -1147,7 +1154,7 @@ function App() {
                       >
                         {message.content}
 
-                        {isLoading && isLast && message.role === 'agent' && (
+                        {isCurrentChatLoading && isLast && message.role === 'agent' && (
                           <span
                             style={{
                               display: 'inline-block',
@@ -1190,7 +1197,7 @@ function App() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleInputKeyDown}
                 placeholder="Ask about rank, college, branch or cutoffs..."
-                disabled={isLoading}
+                disabled={isCurrentChatLoading}
                 style={{
                   flex: 1,
                   minWidth: 0,
@@ -1204,7 +1211,7 @@ function App() {
                 }}
               />
 
-              {isLoading ? (
+              {isCurrentChatLoading ? (
                 <button
                   type="button"
                   onClick={stopGenerating}
