@@ -1,12 +1,27 @@
-from fastapi import FastAPI
+import logging
+import sys
+import json
+
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from langchain_core.messages import HumanMessage, AIMessage
-import json
 
 from agent import app as agent_graph
+
+# ====================== LOGGING ======================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("admission_agent")
+
+# ====================== APP ======================
 
 app = FastAPI(title="JEE Admission Agent API")
 
@@ -18,64 +33,103 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ====================== GLOBAL ERROR HANDLERS ======================
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_handler(request: Request, exc: RequestValidationError):
+    logger.warning(
+        "validation_error path=%s errors=%s", request.url.path, exc.errors()
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Invalid request", "detail": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_handler(request: Request, exc: Exception):
+    logger.exception("unhandled_error path=%s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error"},
+    )
+
+
+# ====================== MODELS ======================
+
+
 class HistoryMessage(BaseModel):
     role: str
     content: str
+
 
 class Query(BaseModel):
     message: str
     history: Optional[List[HistoryMessage]] = []
 
+
+# ====================== ROUTES ======================
+
+
 @app.get("/")
 async def home():
     return {"message": "JEE Admission Agent Backend is running!"}
 
+
 @app.post("/chat")
 async def chat(query: Query):
-    try:
-        messages = []
+    messages = []
 
-        for msg in query.history or []:
-            if msg.role == "user":
-                messages.append(HumanMessage(content=msg.content))
-            elif msg.role == "agent":
-                messages.append(AIMessage(content=msg.content))
+    for msg in query.history or []:
+        if msg.role == "user":
+            messages.append(HumanMessage(content=msg.content))
+        elif msg.role == "agent":
+            messages.append(AIMessage(content=msg.content))
 
-        messages.append(HumanMessage(content=query.message))
+    messages.append(HumanMessage(content=query.message))
 
-        async def event_generator():
-            try:
-                # Stream events from LangGraph
-                async for event in agent_graph.astream_events(
-                    {"messages": messages},
-                    version="v2"
-                ):
-                    kind = event["event"]
+    async def event_generator():
+        try:
+            logger.info("chat_start message_len=%s", len(query.message or ""))
 
-                    # Stream tokens from the LLM
-                    if kind == "on_chat_model_stream":
-                        chunk = event["data"]["chunk"]
-                        content = chunk.content
-                        if content:
-                            yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+            async for event in agent_graph.astream_events(
+                {"messages": messages}, version="v2"
+            ):
+                kind = event["event"]
 
-                    elif kind == "on_tool_start":
-                        yield f"data: {json.dumps({'type': 'status', 'content': 'Searching JoSAA cutoffs...'})}\n\n"
+                # Stream tokens from the LLM
+                if kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    content = chunk.content
+                    if content:
+                        yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
-                    elif kind == "on_tool_end":
-                        yield f"data: {json.dumps({'type': 'status', 'content': 'Writing answer...'})}\n\n"
+                elif kind == "on_tool_start":
+                    tool_name = event.get("name", "unknown_tool")
+                    logger.info("tool_start name=%s", tool_name)
+                    yield f"data: {json.dumps({'type': 'status', 'content': f'Searching JoSAA cutoffs...'})}\n\n"
 
-                    # When the agent finishes
-                    elif kind == "on_chat_model_end":
-                        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+                elif kind == "on_tool_end":
+                    tool_name = event.get("name", "unknown_tool")
+                    tool_output = str(event.get("data", {}).get("output", ""))[:200]
+                    logger.info(
+                        "tool_end name=%s output_preview=%s", tool_name, tool_output
+                    )
+                    yield f"data: {json.dumps({'type': 'status', 'content': 'Writing answer...'})}\n\n"
 
-            except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+                elif kind == "on_chat_model_end":
+                    yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream"
-        )
+            # Always send done so the frontend knows the stream is over
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            logger.info("chat_done")
 
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"detail": str(e)})
+        except Exception as e:
+            logger.exception("chat_stream_error")
+            err = str(e)[:300]
+            yield f"data: {json.dumps({'type': 'error', 'content': f'Sorry, something went wrong: {err}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

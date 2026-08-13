@@ -488,7 +488,24 @@ function App() {
               }
 
               if (data.type === 'error') {
-                throw new Error(data.content);
+                fullContent = data.content || 'Something went wrong. Please try again.';
+                // Update UI immediately with error message
+                setChats((prev) =>
+                  prev.map((chat) => {
+                    if (chat.id !== chatIdToUse) return chat;
+                    const msgs = [...chat.messages];
+                    const lastIdx = msgs.length - 1;
+                    if (msgs[lastIdx]?.role === 'agent') {
+                      msgs[lastIdx] = { role: 'agent', content: fullContent };
+                    }
+                    return { ...chat, messages: msgs };
+                  }),
+                );
+                continue;
+              }
+
+              if (data.type === 'done') {
+                break;
               }
             } catch (err) {
               console.error('SSE parse error:', err);

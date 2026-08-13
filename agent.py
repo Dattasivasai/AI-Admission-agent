@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
@@ -10,6 +11,8 @@ from langgraph.prebuilt import ToolNode
 from typing import TypedDict, Annotated, Sequence
 from langchain_core.messages import BaseMessage
 import operator
+
+logger = logging.getLogger("admission_agent")
 
 load_dotenv()
 
@@ -260,107 +263,116 @@ def search_josaa_cutoffs(
     Use this tool for ANY question about colleges, branches, cutoffs, ranks, categories, years, quotas.
     When the user asks "what can I get with rank X", ALWAYS set min_closing_rank = X.
     """
-    df = JOSAA_DF.copy()
+    try:
+        df = JOSAA_DF.copy()
 
-    if institute:
-        inst_lower = institute.lower().strip()
-        resolved = INSTITUTE_ALIASES.get(inst_lower, institute)
-        df = df[
-            df["institute"].str.contains(resolved, case=False, na=False, regex=False)
-        ]
+        if institute:
+            inst_lower = institute.lower().strip()
+            resolved = INSTITUTE_ALIASES.get(inst_lower, institute)
+            df = df[
+                df["institute"].str.contains(resolved, case=False, na=False, regex=False)
+            ]
 
-    if program:
-        prog_lower = program.lower().strip()
-        resolved_prog = PROGRAM_ALIASES.get(prog_lower, program)
-        df = df[
-            df["academic_program"].str.contains(resolved_prog, case=False, na=False)
-        ]
+        if program:
+            prog_lower = program.lower().strip()
+            resolved_prog = PROGRAM_ALIASES.get(prog_lower, program)
+            df = df[
+                df["academic_program"].str.contains(resolved_prog, case=False, na=False)
+            ]
 
-    if year is not None:
-        df = df[df["year"] == year]
-    if round is not None:
-        df = df[df["round"] == round]
-    if category:
-        df = df[df["seat_type"].str.contains(category, case=False, na=False)]
-    if quota:
-        df = df[df["quota"].str.upper() == quota.upper()]
-    if gender:
-        df = df[df["gender"].str.contains(gender, case=False, na=False)]
+        if year is not None:
+            df = df[df["year"] == year]
+        if round is not None:
+            df = df[df["round"] == round]
+        if category:
+            df = df[df["seat_type"].str.contains(category, case=False, na=False)]
+        if quota:
+            df = df[df["quota"].str.upper() == quota.upper()]
+        if gender:
+            df = df[df["gender"].str.contains(gender, case=False, na=False)]
 
-    if max_closing_rank is not None:
-        df = df[df["closing_rank"] <= max_closing_rank]
-    if min_closing_rank is not None:
-        df = df[df["closing_rank"] >= min_closing_rank]
+        if max_closing_rank is not None:
+            df = df[df["closing_rank"] <= max_closing_rank]
+        if min_closing_rank is not None:
+            df = df[df["closing_rank"] >= min_closing_rank]
 
-    total = len(df)
-    if total == 0:
-        return (
-            "No matching records found.\n"
-            f"Filters → institute={institute}, program={program}, year={year}, "
-            f"category={category}, quota={quota}, gender={gender}, "
-            f"min_closing_rank={min_closing_rank}, max_closing_rank={max_closing_rank}"
+        total = len(df)
+        if total == 0:
+            return (
+                "No matching records found.\n"
+                f"Filters → institute={institute}, program={program}, year={year}, "
+                f"category={category}, quota={quota}, gender={gender}, "
+                f"min_closing_rank={min_closing_rank}, max_closing_rank={max_closing_rank}"
+            )
+
+        # Prefer non-PwD, OPEN, Gender-Neutral seats when many results exist
+        df = df.copy()
+        df["_is_pwd"] = df["seat_type"].str.contains("PwD", case=False, na=False)
+        df["_is_open"] = df["seat_type"].str.upper().str.startswith("OPEN")
+        df["_is_gender_neutral"] = df["gender"].str.contains(
+            "Gender-Neutral", case=False, na=False
         )
 
-    # Prefer non-PwD, OPEN, Gender-Neutral seats when many results exist
-    df = df.copy()
-    df["_is_pwd"] = df["seat_type"].str.contains("PwD", case=False, na=False)
-    df["_is_open"] = df["seat_type"].str.upper().str.startswith("OPEN")
-    df["_is_gender_neutral"] = df["gender"].str.contains(
-        "Gender-Neutral", case=False, na=False
-    )
+        df = df.sort_values(
+            by=[
+                "year",
+                "round",
+                "_is_pwd",
+                "_is_open",
+                "_is_gender_neutral",
+                "closing_rank",
+            ],
+            ascending=[False, False, True, False, False, True],
+        )
 
-    df = df.sort_values(
-        by=[
+        cols = [
             "year",
             "round",
-            "_is_pwd",
-            "_is_open",
-            "_is_gender_neutral",
+            "institute",
+            "academic_program",
+            "quota",
+            "seat_type",
+            "gender",
+            "opening_rank",
             "closing_rank",
-        ],
-        ascending=[False, False, True, False, False, True],
-    )
+        ]
+        result_df = df[cols].head(limit)
 
-    cols = [
-        "year",
-        "round",
-        "institute",
-        "academic_program",
-        "quota",
-        "seat_type",
-        "gender",
-        "opening_rank",
-        "closing_rank",
-    ]
-    result_df = df[cols].head(limit)
+        lines = [
+            f"Found {total} matching rows "
+            f"(showing top {len(result_df)} by latest year/round, preferring non-PwD & OPEN):\n"
+        ]
+        for _, row in result_df.iterrows():
+            orank = int(row["opening_rank"]) if pd.notna(row["opening_rank"]) else "N/A"
+            crank = int(row["closing_rank"])
+            lines.append(
+                f"• {row['year']} R{row['round']} | {row['institute']} | {row['academic_program']} | "
+                f"{row['quota']} | {row['seat_type']} | {row['gender']} | OR {orank} – CR {crank}"
+            )
 
-    lines = [
-        f"Found {total} matching rows "
-        f"(showing top {len(result_df)} by latest year/round, preferring non-PwD & OPEN):\n"
-    ]
-    for _, row in result_df.iterrows():
-        orank = int(row["opening_rank"]) if pd.notna(row["opening_rank"]) else "N/A"
-        crank = int(row["closing_rank"])
-        lines.append(
-            f"• {row['year']} R{row['round']} | {row['institute']} | {row['academic_program']} | "
-            f"{row['quota']} | {row['seat_type']} | {row['gender']} | OR {orank} – CR {crank}"
-        )
+        return "\n".join(lines)
 
-    return "\n".join(lines)
+    except Exception as e:
+        logger.exception("tool_search_josaa_failed")
+        return f"Error searching cutoffs: {e}"
 
 
 @tool
 def percentile_to_rank(percentile: float) -> str:
     """Convert JEE Main percentile to approximate All India Rank (approximate only)."""
-    if percentile >= 99.9:
-        rank = int((100 - percentile) * 500)
-    elif percentile >= 99:
-        rank = int((100 - percentile) * 2500)
-    elif percentile >= 97:
-        rank = int((100 - percentile) * 12000)
-    else:
-        rank = int((100 - percentile) * 20000)
-    return f"Approximate Rank ≈ {rank:,} for {percentile} percentile (rough estimate based on recent years)."
+    try:
+        if percentile >= 99.9:
+            rank = int((100 - percentile) * 500)
+        elif percentile >= 99:
+            rank = int((100 - percentile) * 2500)
+        elif percentile >= 97:
+            rank = int((100 - percentile) * 12000)
+        else:
+            rank = int((100 - percentile) * 20000)
+        return f"Approximate Rank ≈ {rank:,} for {percentile} percentile (rough estimate based on recent years)."
+    except Exception as e:
+        logger.exception("tool_percentile_to_rank_failed")
+        return f"Error converting percentile: {e}"
 
 
 @tool
@@ -548,7 +560,7 @@ STRICT TOOL ROUTING (one tool call, then answer):
     → If user is unsure: quota_mode=all_india, order_style=stronger_first.
     → NEVER use search_josaa_cutoffs for a full preference list.
 
-2) User gives a RANK o Ray on your phone started, should I be sor AIR (e.g. "25000 rank", "AIR 12000") and asks what they can get
+2) User gives a RANK or AIR (e.g. "25000 rank", "AIR 12000") and asks what they can get
     → call search_josaa_cutoffs ONCE with:
         min_closing_rank = that rank
         year = 2025
