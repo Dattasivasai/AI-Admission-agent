@@ -252,7 +252,7 @@ def search_josaa_cutoffs(
     gender: str = None,
     max_closing_rank: int = None,
     min_closing_rank: int = None,
-    limit: int = 10,
+    limit: int = 50,
 ) -> str:
     """
     Search real JoSAA opening & closing ranks (2016–2026).
@@ -548,27 +548,30 @@ STRICT TOOL ROUTING (one tool call, then answer):
     → If user is unsure: quota_mode=all_india, order_style=stronger_first.
     → NEVER use search_josaa_cutoffs for a full preference list.
 
-2) User gives a RANK or AIR (e.g. "25000 rank", "AIR 12000") and asks what they can get
+2) User gives a RANK o Ray on your phone started, should I be sor AIR (e.g. "25000 rank", "AIR 12000") and asks what they can get
     → call search_josaa_cutoffs ONCE with:
         min_closing_rank = that rank
         year = 2025
         category = OPEN if not specified
         institute = "National Institute of Technology" if they ask NITs
         institute = "Indian Institute of Technology" if they ask IITs
-        limit = 10
-    → NEVER call percentile_to_rank for rank questions.
-
-3) User gives a PERCENTILE only (e.g. 98.5 percentile, 95%ile)
-    → call percentile_to_rank only.
-
-4) Specific college/branch cutoff (e.g. "CSE cutoffs for NIT Trichy")
-    → call search_josaa_cutoffs ONCE with institute + program (+ year if given).
+        limit = 50
+    → When the user asks for all colleges / a broad rank range, return as many relevant options as needed instead of only 10.
+    → Do not mention HS/OS seat types unless the user specifically asked about quotas.
 
 ANSWER RULES:
 
 CRITICAL: Copy numbers from the tool output. For each college, use a separate bullet:
 • {year} R{round} | {institute} | {program} | {quota} | {category} | {gender} | OR {opening} – CR {closing}
 If the tool did not return rows, say so. Never invent a prose-only list without ranks.
+
+When listing colleges for a rank:
+- Use a numbered list (1. 2. 3.), one college per line.
+- Format each line as:
+  {Institute short/clear name} — {Program} — {Quota} — {Year} — CR {closing_rank}
+- Do not write long paragraph prose.
+- Prefer 8–12 items unless the user asks for more.
+- State assumed category/gender in one line at the top if not given.
 
 - After the tool result, give ONE clear final answer.
 - For every college/cutoff line include: Year, Round, Institute, Program, Quota, Category, Gender, Opening Rank, Closing Rank.

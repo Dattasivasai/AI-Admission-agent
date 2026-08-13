@@ -118,6 +118,82 @@ function App() {
   const currentChat = chats.find((chat) => chat.id === currentChatId);
   const hasMessages = Boolean(currentChat?.messages.length);
 
+  const renderAgentTable = (content: string) => {
+    const lines = content
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const numbered = lines.filter((line) => /^[0-9]+\./.test(line));
+    if (!numbered.length) return content;
+
+    const rows = numbered
+      .map((line) => line.replace(/^[0-9]+\.\s*/, ''))
+      .map((line) => line.split(' — ').map((cell) => cell.trim()));
+
+    const hasTable = rows.every((cells) => cells.length >= 4);
+    if (!hasTable) return content;
+
+    const headers = ['Institute', 'Program', 'Quota', 'Year', 'CR'];
+    return (
+      <div style={{ overflowX: 'auto', paddingTop: '4px' }}>
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: '14px',
+            lineHeight: 1.9,
+          }}
+        >
+          <thead>
+            <tr>
+              {headers.map((header) => (
+                <th
+                  key={header}
+                  style={{
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    borderBottom: `1px solid ${colors.border}`,
+                    color: colors.textSecondary,
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((cells, rowIndex) => {
+              const [institute, program, quota, year, crOrRest] = cells;
+              const cr = crOrRest ?? cells[4] ?? '';
+              return (
+                <tr key={rowIndex}>
+                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
+                    {institute}
+                  </td>
+                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
+                    {program}
+                  </td>
+                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
+                    {quota}
+                  </td>
+                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
+                    {year}
+                  </td>
+                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
+                    {cr}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   const colors = {
     mainBackground: '#09090b',
     sidebarBackground: '#0c0c0f',
@@ -1083,7 +1159,7 @@ function App() {
                 maxWidth: '900px',
                 minHeight: '100%',
                 margin: '0 auto',
-                padding: '36px 24px 48px',
+                padding: '24px 32px 28px',
                 boxSizing: 'border-box',
                 display: 'flex',
                 flexDirection: 'column',
@@ -1101,73 +1177,46 @@ function App() {
                       width: '100%',
                       display: 'flex',
                       justifyContent: isUser ? 'flex-end' : 'flex-start',
+                      marginBottom: '20px',
+                      paddingLeft: isUser ? '0' : '12px',
+                      paddingRight: isUser ? '12px' : '0',
                     }}
                   >
                     <div
                       style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        flexDirection: isUser ? 'row-reverse' : 'row',
-                        gap: '10px',
-                        maxWidth: '84%',
+                        maxWidth: isUser ? '84%' : 'min(720px, 90%)',
+                        width: isUser ? 'auto' : '100%',
+                        marginTop: isUser ? '0' : '16px',
+                        marginBottom: isUser ? '0' : '24px',
+                        marginLeft: isUser ? '0' : '40px',
+                        marginRight: isUser ? '0' : '56px',
+                        padding: isUser ? '10px 14px' : '0',
+                        borderRadius: isUser ? '16px 5px 16px 16px' : '0',
+                        background: isUser ? colors.accent : 'transparent',
+                        color: isUser ? '#ffffff' : colors.textPrimary,
+                        fontSize: '14px',
+                        lineHeight: isUser ? 1.65 : 1.8,
+                        whiteSpace: 'pre-wrap',
+                        overflowWrap: 'anywhere',
+                        textAlign: isUser ? 'right' : 'left',
+                        boxShadow: isUser ? '0 6px 18px rgba(124, 58, 237, 0.22)' : 'none',
                       }}
                     >
-                      <div
-                        style={{
-                          width: '30px',
-                          height: '30px',
-                          flexShrink: 0,
-                          display: 'grid',
-                          placeItems: 'center',
-                          borderRadius: '9px',
-                          background: isUser
-                            ? colors.accent
-                            : colors.elevatedBackground,
-                          border: `1px solid ${colors.border}`,
-                          color: isUser ? '#ffffff' : colors.textPrimary,
-                          fontSize: '13px',
-                          fontWeight: 700,
-                        }}
-                      >
-                        {isUser ? 'Y' : 'AI'}
-                      </div>
+                      {message.role === 'agent' ? renderAgentTable(message.content) : message.content}
 
-                      <div
-                        style={{
-                          padding: '13px 17px',
-                          borderRadius: isUser
-                            ? '16px 5px 16px 16px'
-                            : '5px 16px 16px 16px',
-                          background: isUser
-                            ? colors.accent
-                            : colors.agentMessage,
-                          border: isUser ? 'none' : `1px solid ${colors.border}`,
-                          color: isUser ? '#ffffff' : colors.textPrimary,
-                          fontSize: '14px',
-                          lineHeight: 1.7,
-                          whiteSpace: 'pre-wrap',
-                          overflowWrap: 'anywhere',
-                          boxShadow: isUser
-                            ? '0 8px 25px rgba(124, 58, 237, 0.16)'
-                            : 'none',
-                        }}
-                      >
-                        {message.content}
-
-                        {isCurrentChatLoading && isLast && message.role === 'agent' && (
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              width: '7px',
-                              height: '14px',
-                              background: colors.accent,
-                              marginLeft: '2px',
-                              verticalAlign: 'middle',
-                              animation: 'blink 1s step-end infinite',
-                            }}
-                          />
-                        )}
-                      </div>
+                      {isCurrentChatLoading && isLast && message.role === 'agent' && (
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            width: '7px',
+                            height: '14px',
+                            background: colors.accent,
+                            marginLeft: '2px',
+                            verticalAlign: 'middle',
+                            animation: 'blink 1s step-end infinite',
+                          }}
+                        />
+                      )}
                     </div>
                   </div>
                 );
