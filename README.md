@@ -1,92 +1,69 @@
-\# AI Admission Agent
+# 🎓 AI Admission Agent
 
+**JEE Main / JoSAA counselling assistant** powered by real opening–closing rank data and an LLM tool-calling agent.
 
+Ask about ranks, colleges, branches, and build a **JoSAA-style preference list** — grounded in historical cutoffs, not invented numbers.
 
-JEE Main / JoSAA counselling assistant that answers cutoff questions and helps build preference (choice) lists using real historical opening–closing rank data.
+🌐 **Live:** [ai-admission-agent.vercel.app](https://ai-admission-agent.vercel.app)
 
+![Python](https://img.shields.io/badge/Python-3.10%2B-green)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-teal)
+![React](https://img.shields.io/badge/React-TypeScript-blue)
+![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple)
+![Groq](https://img.shields.io/badge/LLM-Groq-orange)
+![Firebase](https://img.shields.io/badge/Auth-Firebase-yellow)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
+---
 
-\*\*Live app:\*\* \[ai-admission-agent.vercel.app](https://ai-admission-agent.vercel.app)
+## 📖 Table of Contents
 
+- [Features](#-features)
+- [Demo queries](#-demo-queries)
+- [Architecture](#-architecture)
+- [Tech stack](#-tech-stack)
+- [Project structure](#-project-structure)
+- [Quick start](#-quick-start)
+- [Configuration](#️-configuration)
+- [Agent tools](#-agent-tools)
+- [Deployment](#-deployment)
+- [Important disclaimers](#-important-disclaimers)
+- [Troubleshooting](#-troubleshooting)
 
+---
 
-\---
+## ✨ Features
 
+### 🔍 Cutoff search
+- Search **JoSAA opening & closing ranks** (NITs, IIITs, IITs, GFTIs)
+- Filter by institute, branch, year, round, category, quota, gender
+- Rank-based queries: *“What can I get with rank 25,000?”*
 
+### 📋 Choice list builder
+- Build a **JoSAA-style preference order** from rank + course priorities (e.g. CSE → ECE → IT)
+- Options: All-India vs HS-first, stronger-first vs safer-first
+- Defaults: All-India + stronger-first (unless the user asks otherwise)
 
-\## Features
+### 💬 Chat experience
+- Streaming answers (SSE)
+- Google sign-in + **chat history** (Firebase)
+- Guest mode: fresh chat each visit (no saved history)
+- Stop generation while streaming
 
+### 📊 Data-backed answers
+- Pandas search over JoSAA CSV (prefer recent years, e.g. 2024–2026)
+- LLM uses **tools** — should not invent cutoff numbers
+- Optional percentile → approximate rank helper
 
+---
 
-\- Chat UI for rank- and college-based questions
-
-\- JoSAA opening/closing rank search (NITs, IIITs, IITs, GFTIs)
-
-\- Rank-based “what can I get?” suggestions
-
-\- JoSAA-style \*\*choice list\*\* builder (course order, All-India vs HS, stronger vs safer)
-
-\- Approximate percentile → rank conversion
-
-\- Google sign-in and chat history (Firebase Auth + Firestore)
-
-\- Guest mode: new empty chat each visit (no persisted history)
-
-
-
-\---
-
-
-
-\## Tech stack
-
-
-
-| Layer | Stack |
-
-|-------|--------|
-
-| Frontend | React, TypeScript, Vite |
-
-| Backend | FastAPI, Uvicorn |
-
-| Agent | LangGraph, LangChain, Groq LLM |
-
-| Data | Pandas + JoSAA CSV |
-
-| Auth / DB | Firebase Authentication, Cloud Firestore |
-
-| Deploy | Vercel (frontend) |
-
-
-
-\---
-
-
-
-\## Project structure
-
-
+## 💡 Demo queries
 
 ```text
-
-AI-Admission-agent/
-
-├── agent.py                 # LLM agent + tools (search, choice list, percentile)
-
-├── main.py                  # FastAPI app + SSE streaming
-
-├── josaa\_cutoffs.csv        # Cutoff dataset
-
-├── requirements.txt
-
-├── frontend/                # React app
-
-│   └── src/
-
-│       ├── App.tsx
-
-│       └── firebase.ts
-
-└── README.md
-
+Which NIT can I get with 25000 rank?
+Show CSE cutoffs for NIT Trichy
+Which IIIT can I get with 51000 rank? Category OPEN, Gender-Neutral
+Build my JoSAA choice list.
+  Rank: 25000 | Category: OPEN | Gender: male
+  Courses: CSE, ECE | Quota: All India | Order: stronger first
+98.5 percentile is approximately what rank?
