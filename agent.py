@@ -11,6 +11,7 @@ from langgraph.prebuilt import ToolNode
 from typing import TypedDict, Annotated, Sequence
 from langchain_core.messages import BaseMessage
 import operator
+from typing import Optional
 
 logger = logging.getLogger("admission_agent")
 
@@ -246,16 +247,16 @@ PROGRAM_ALIASES = {
 
 @tool
 def search_josaa_cutoffs(
-    institute: str = None,
-    program: str = None,
-    year: int = None,
-    round: int = None,
-    category: str = None,
-    quota: str = None,
-    gender: str = None,
-    max_closing_rank: int = None,
-    min_closing_rank: int = None,
-    limit: int = 50,
+    institute: Optional[str] = None,
+    program: Optional[str] = None,
+    year: Optional[int] = None,
+    round: Optional[int] = None,
+    category: Optional[str] = None,
+    quota: Optional[str] = None,
+    gender: Optional[str] = None,
+    max_closing_rank: Optional[int] = None,
+    min_closing_rank: Optional[int] = None,
+    limit: int = 15,
 ) -> str:
     """
     Search real JoSAA opening & closing ranks (2016–2026).
@@ -263,15 +264,17 @@ def search_josaa_cutoffs(
     Use this tool for ANY question about colleges, branches, cutoffs, ranks, categories, years, quotas.
     When the user asks "what can I get with rank X", ALWAYS set min_closing_rank = X.
     """
+    print("SEARCH ARGS:", institute, program, year, round, category, quota, gender, min_closing_rank, max_closing_rank)
     try:
         df = JOSAA_DF.copy()
 
         if institute:
             inst_lower = institute.lower().strip()
             resolved = INSTITUTE_ALIASES.get(inst_lower, institute)
-            df = df[
-                df["institute"].str.contains(resolved, case=False, na=False, regex=False)
-            ]
+            # ignore commas so "Technology Tiruchirappalli" matches "Technology, Tiruchirappalli"
+            needle = resolved.replace(",", "").strip()
+            inst_norm = df["institute"].astype(str).str.replace(",", "", regex=False)
+            df = df[inst_norm.str.contains(needle, case=False, na=False, regex=False)]
 
         if program:
             prog_lower = program.lower().strip()
@@ -425,7 +428,9 @@ def build_choice_list(
         # parse courses
         course_list = [c.strip() for c in courses.split(",") if c.strip()]
         if not course_list:
-            return "No courses provided. Ask the user for course order, e.g. CSE, ECE, IT."
+            return (
+                "No courses provided. Ask the user for course order, e.g. CSE, ECE, IT."
+            )
 
         df = df[df["seat_type"].str.contains(cat, case=False, na=False)]
         df = df[~df["seat_type"].str.contains("PwD", case=False, na=False)]
@@ -444,17 +449,18 @@ def build_choice_list(
 
             prog_key = course.lower().strip()
             resolved = PROGRAM_ALIASES.get(prog_key, course)
-            cdf = df[df["academic_program"].str.contains(resolved, case=False, na=False)]
+            cdf = df[
+                df["academic_program"].str.contains(resolved, case=False, na=False)
+            ]
 
             if cdf.empty:
                 continue
 
             # latest CR per institute+program+quota
             cdf = cdf.sort_values(["year", "round"], ascending=[False, False])
-            latest = (
-                cdf.groupby(["institute", "academic_program", "quota"], as_index=False)
-                .first()
-            )
+            latest = cdf.groupby(
+                ["institute", "academic_program", "quota"], as_index=False
+            ).first()
 
             if quota_mode == "all_india":
                 # prefer OS/AI; still allow HS if no OS
@@ -544,55 +550,64 @@ tools = [search_josaa_cutoffs, percentile_to_rank, build_choice_list]
 # ====================== LLM ======================
 
 llm = ChatGroq(
-    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
     temperature=0.1,
     api_key=os.getenv("GROQ_API_KEY") or os.getenv("API_key"),
 )
 
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are an expert JEE Main + JoSAA Admission Counselor with real cutoff data (prefer 2024–2026).
+SYSTEM_PROMPT = """You are an expert JEE Main + JoSAA Admission Counselor.
+You only use tool results for ranks and cutoffs. Never invent numbers.
 
-STRICT TOOL ROUTING (one tool call, then answer):
-1) Choice list / preference order / "what should I fill" / "build my choices" / "JoSAA form"
-    → call build_choice_list ONCE.
-    → Need rank, category, gender, ordered courses. If missing, ASK.
-    → If user is unsure: quota_mode=all_india, order_style=stronger_first.
-    → NEVER use search_josaa_cutoffs for a full preference list.
+═══════════════════════════════════════
+RESPONSE RULES (always follow)
+═══════════════════════════════════════
 
-2) User gives a RANK or AIR (e.g. "25000 rank", "AIR 12000") and asks what they can get
-    → call search_josaa_cutoffs ONCE with:
-        min_closing_rank = that rank
-        year = 2025
-        category = OPEN if not specified
-        institute = "National Institute of Technology" if they ask NITs
-        institute = "Indian Institute of Technology" if they ask IITs
-        limit = 50
-    → When the user asks for all colleges / a broad rank range, return as many relevant options as needed instead of only 10.
-    → Do not mention HS/OS seat types unless the user specifically asked about quotas.
+1) CHOICE / PREFERENCE LIST
+   - Keywords: choice list, preference order, what to fill, JoSAA form, build my choices
+   - Call build_choice_list ONCE.
+   - Required: rank, category, gender, ordered courses (e.g. CSE, ECE, IT).
+   - If course order missing → ASK.
+   - If HS vs All-India missing → ASK. Default if unsure: All-India (OS/AI).
+   - If stronger vs safer missing → ASK. Default if unsure: stronger-first.
+   - Output format ONLY:
+     Choice No | Institute | Academic Program
+     (optionally add Quota, Year, CR, Band on the same line or a short note below)
+   - Do NOT prioritise HS unless the user asked for HS / home state.
 
-ANSWER RULES:
+2) CUTOFF / COLLEGE SEARCH ANSWERS
+   - Call search_josaa_cutoffs ONCE.
+   - NEVER reply with only one number ("the cutoff is 1449").
+   - NEVER use a broken markdown table with shifted columns.
+   - Use a numbered list. Each line MUST include:
+     Year, Round, Institute (or short name), Program, Quota, Category, Gender, OR, CR
+   - Example:
+     1. 2025 R6 | NIT Trichy | CSE | OS | OPEN | Gender-Neutral | OR 659 – CR 1449
+     2. 2025 R6 | NIT Trichy | CSE | HS | OPEN | Gender-Neutral | OR 559 – CR 4569
+   - Show multiple useful rows from the tool (up to 8–10), prefer OPEN non-PwD.
+   - Default quota focus: OS/AI unless user asked HS.
+   - Prefer recent years (2024–2026). Omit year in the tool call unless the user specified one.
 
-CRITICAL: Copy numbers from the tool output. For each college, use a separate bullet:
-• {year} R{round} | {institute} | {program} | {quota} | {category} | {gender} | OR {opening} – CR {closing}
-If the tool did not return rows, say so. Never invent a prose-only list without ranks.
+3) RANK QUESTIONS ("what can I get with rank X")
+   - Call search_josaa_cutoffs with min_closing_rank = X, limit 15.
+   - If they ask NITs → institute filter for National Institute of Technology.
+   - If they ask IIITs → Indian Institute of Information Technology.
+   - Assume OPEN + Gender-Neutral if not given; say that in one line.
+   - Answer as a numbered college list with Quota, Year, CR (and OR if available).
+   - Do not list HS seats unless user asked for home state / HS.
 
-When listing colleges for a rank:
-- Use a numbered list (1. 2. 3.), one college per line.
-- Format each line as:
-  {Institute short/clear name} — {Program} — {Quota} — {Year} — CR {closing_rank}
-- Do not write long paragraph prose.
-- Prefer 8–12 items unless the user asks for more.
-- State assumed category/gender in one line at the top if not given.
+4) PERCENTILE
+   - Only if user gives a percentile (e.g. 98.5%ile) → percentile_to_rank.
+   - NEVER use percentile_to_rank when the user already gave a rank/AIR.
 
-- After the tool result, give ONE clear final answer.
-- For every college/cutoff line include: Year, Round, Institute, Program, Quota, Category, Gender, Opening Rank, Closing Rank.
-- Never list only institute + branch.
-- Do not retry tools with different years unless the tool returned no rows.
-- Do not invent cutoffs. If category/gender were assumed, state that in one line.
-- Short follow-ups like "any suggestions": do NOT repeat the same list; ask branch order / HS vs All-India / stronger vs safer, or offer build_choice_list.
+5) ACCURACY
+   - NEVER say "no matching records" unless the tool output starts with that.
+   - One tool call, then the final answer. No invented cutoffs.
+   - Short follow-ups ("any suggestions"): do not repeat the same list unchanged; ask what they want next (branch order, HS, stronger/safer) or offer a choice list.
 
-Tone: direct, honest, student-friendly. Cutoffs change every year."""
+Tone: direct, clear, student-friendly. Cutoffs change every year — one short disclaimer is enough.
+"""
 
 
 def agent_node(state: AgentState):
