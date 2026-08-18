@@ -220,12 +220,21 @@ function App() {
         try {
           const userChats = await loadUserChats(currentUser.uid);
           setChats(userChats);
+          
+          // Restore last used chat from localStorage
+          const lastChatId = localStorage.getItem(`lastChat_${currentUser.uid}`);
+          if (lastChatId && userChats.some((c) => c.id === lastChatId)) {
+            setCurrentChatId(lastChatId);
+          } else {
+            setCurrentChatId(null);
+          }
         } catch (error) {
           console.error('Failed to load chats:', error);
           setChats([]);
+          setCurrentChatId(null);
         }
-        setCurrentChatId(null);
       } else {
+        // Guest mode: clear everything, start fresh each visit
         setChats([]);
         setCurrentChatId(null);
       }
@@ -233,6 +242,14 @@ function App() {
 
     return () => unsubscribe();
   }, []);
+
+  // Save current chat ID to localStorage when it changes (logged-in users only)
+  useEffect(() => {
+    if (user && currentChatId) {
+      localStorage.setItem(`lastChat_${user.uid}`, currentChatId);
+    }
+  }, [currentChatId, user]);
+
   const handleGoogleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
@@ -1209,8 +1226,8 @@ function App() {
                         borderRadius: isUser ? '16px 5px 16px 16px' : '0',
                         background: isUser ? colors.accent : 'transparent',
                         color: isUser ? '#ffffff' : colors.textPrimary,
-                        fontSize: '14px',
-                        lineHeight: isUser ? 1.65 : 1.8,
+                        fontSize: '16px',
+                        lineHeight: isUser ? 1.65 : 1.9,
                         whiteSpace: 'pre-wrap',
                         overflowWrap: 'anywhere',
                         textAlign: isUser ? 'right' : 'left',
@@ -1242,13 +1259,13 @@ function App() {
 
         {/* Input */}
         <div style={{ padding: '14px 24px 22px', background: colors.mainBackground }}>
-          <div style={{ width: '100%', maxWidth: '900px', margin: '0 auto' }}>
+          <div style={{ width: '100%', maxWidth: '740px', margin: '0 auto' }}>
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '10px',
-                padding: '7px',
+                gap: '8px',
+                padding: '4px',
                 borderRadius: '18px',
                 background: colors.inputBackground,
                 border: `1px solid ${colors.border}`,
@@ -1265,13 +1282,13 @@ function App() {
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  padding: '12px 14px',
+                  padding: '10px 14px',
                   border: 'none',
                   outline: 'none',
                   background: 'transparent',
                   color: colors.textPrimary,
                   fontFamily: 'inherit',
-                  fontSize: '14px',
+                  fontSize: '16px',
                 }}
               />
 
