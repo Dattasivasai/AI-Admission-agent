@@ -127,22 +127,38 @@ function App() {
     const numbered = lines.filter((line) => /^[0-9]+\./.test(line));
     if (!numbered.length) return content;
 
+    // Parse pipe-delimited format: can be 7 or 8 columns
+    // Format 1 (7 cols): 2026 R4 | Institute | Program | Quota | Category | Gender | OR–CR
+    // Format 2 (8 cols): 2026 | R4 | Institute | Program | Quota | Category | Gender | OR–CR
     const rows = numbered
       .map((line) => line.replace(/^[0-9]+\.\s*/, ''))
-      .map((line) => line.split(' — ').map((cell) => cell.trim()));
+      .map((line) => {
+        const parts = line.split('|').map((p) => p.trim());
+        
+        // If 7 columns and first column looks like "2026 R4", split it
+        if (parts.length === 7 && /^\d{4}\s+R\d+/.test(parts[0])) {
+          const [year, round] = parts[0].split(/\s+/);
+          return [year, round, ...parts.slice(1)];
+        }
+        
+        return parts;
+      })
+      .filter((cells) => cells.length >= 8); // Only valid rows with all 8 columns
 
-    const hasTable = rows.every((cells) => cells.length >= 4);
+    const hasTable = rows.length > 0;
     if (!hasTable) return content;
 
-    const headers = ['Institute', 'Program', 'Quota', 'Year', 'CR'];
+    const headers = ['Year', 'Round', 'Institute', 'Program', 'Quota', 'Category', 'Gender', 'Opening Rank', 'Closing Rank'];
+    
     return (
       <div style={{ overflowX: 'auto', paddingTop: '4px' }}>
         <table
           style={{
             width: '100%',
+            minWidth: '1200px',
             borderCollapse: 'collapse',
-            fontSize: '14px',
-            lineHeight: 1.9,
+            fontSize: '13px',
+            lineHeight: 1.5,
           }}
         >
           <thead>
@@ -152,11 +168,12 @@ function App() {
                   key={header}
                   style={{
                     textAlign: 'left',
-                    padding: '8px 10px',
+                    padding: '6px 8px',
                     borderBottom: `1px solid ${colors.border}`,
                     color: colors.textSecondary,
                     fontWeight: 600,
                     whiteSpace: 'nowrap',
+                    fontSize: '12px',
                   }}
                 >
                   {header}
@@ -166,24 +183,35 @@ function App() {
           </thead>
           <tbody>
             {rows.map((cells, rowIndex) => {
-              const [institute, program, quota, year, crOrRest] = cells;
-              const cr = crOrRest ?? cells[4] ?? '';
+              // cells[0]=Year, cells[1]=Round, cells[2]=Institute, cells[3]=Program,
+              // cells[4]=Quota, cells[5]=Category, cells[6]=Gender, cells[7]=OR–CR
+              const [year, round, institute, program, quota, category, gender, rangeStr] = cells;
+              
+              // Parse OR–CR from format "OR 103 – CR 1331"
+              let orRank = '';
+              let crRank = '';
+              if (rangeStr) {
+                const match = rangeStr.match(/OR\s*(\d+)\s*[–-]\s*CR\s*(\d+)/);
+                if (match) {
+                  orRank = match[1];
+                  crRank = match[2];
+                } else {
+                  crRank = rangeStr;
+                }
+              }
+
               return (
-                <tr key={rowIndex}>
-                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
-                    {institute}
-                  </td>
-                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
-                    {program}
-                  </td>
-                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
-                    {quota}
-                  </td>
-                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
-                    {year}
-                  </td>
-                  <td style={{ padding: '10px 10px', verticalAlign: 'top', borderBottom: `1px solid ${colors.border}` }}>
-                    {cr}
+                <tr key={rowIndex} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{year}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{round}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{institute}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{program}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{quota}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{category}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>{gender}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>{orRank}</td>
+                  <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {crRank}
                   </td>
                 </tr>
               );
@@ -1125,7 +1153,7 @@ function App() {
                     fontWeight: 750,
                   }}
                 >
-                  Plan your JEE admission journey
+                  Plan your Admission journey
                 </h1>
 
                 <p

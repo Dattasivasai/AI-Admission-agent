@@ -256,13 +256,15 @@ def search_josaa_cutoffs(
     gender: Optional[str] = None,
     max_closing_rank: Optional[int] = None,
     min_closing_rank: Optional[int] = None,
-    limit: int = 15,
+    limit: int = 50,
 ) -> str:
     """
     Search real JoSAA opening & closing ranks (2016–2026).
 
     Use this tool for ANY question about colleges, branches, cutoffs, ranks, categories, years, quotas.
     When the user asks "what can I get with rank X", ALWAYS set min_closing_rank = X.
+    For specific college+branch questions, limit=50 gives full coverage (all quotas, categories, genders).
+    For rank-range searches, limit=50 shows top 50 colleges user can get into.
     """
     print("SEARCH ARGS:", institute, program, year, round, category, quota, gender, min_closing_rank, max_closing_rank)
     try:
@@ -576,26 +578,37 @@ RESPONSE RULES (always follow)
      (optionally add Quota, Year, CR, Band on the same line or a short note below)
    - Do NOT prioritise HS unless the user asked for HS / home state.
 
-2) CUTOFF / COLLEGE SEARCH ANSWERS
-   - Call search_josaa_cutoffs ONCE.
-   - NEVER reply with only one number ("the cutoff is 1449").
-   - NEVER use a broken markdown table with shifted columns.
-   - Use a numbered list. Each line MUST include:
-     Year, Round, Institute (or short name), Program, Quota, Category, Gender, OR, CR
-   - Example:
-     1. 2025 R6 | NIT Trichy | CSE | OS | OPEN | Gender-Neutral | OR 659 – CR 1449
-     2. 2025 R6 | NIT Trichy | CSE | HS | OPEN | Gender-Neutral | OR 559 – CR 4569
-   - Show multiple useful rows from the tool (up to 8–10), prefer OPEN non-PwD.
-   - Default quota focus: OS/AI unless user asked HS.
-   - Prefer recent years (2024–2026). Omit year in the tool call unless the user specified one.
+2) CUTOFF / COLLEGE SEARCH ANSWERS — FOR SPECIFIC COLLEGE+BRANCH
+   - Call search_josaa_cutoffs ONCE with limit=50 for specific college+branch queries (e.g. "NIT Trichy CSE").
+   - NEVER reply with only one number ("the cutoff is 1449") or summarize to just 5 rows.
+   - Use NUMBERED LIST ONLY (no markdown table — tables break in your UI).
+   - Each line MUST be pipe-delimited:
+     Year R# | Institute | Program | Quota | Category | Gender | OR – CR
+     Example: 1. 2026 R4 | NIT Trichy | CSE | OS | OPEN | Gender-Neutral | OR 103 – CR 1317
+   - COMPLETE useful detail: For specific college+branch, show:
+     * Latest year: ALL main quotas (OS, HS) and ALL categories (OPEN, EWS, OBC-NCL, SC, ST)
+     * ALL genders (Gender-Neutral, Female-only) when present, across ALL rounds if available
+     * Include prior year (e.g. 2025) OPEN OS for comparison if tool returned it
+     * Do NOT drop any row (OPEN, OS/HS, categories) to keep it "short"
+   - Organize by: latest year first → round (R1 to R6) → quota (OS/HS) → category.
+   - Prefer recent years (2024–2026). Omit year in tool call unless user specified one.
 
 3) RANK QUESTIONS ("what can I get with rank X")
-   - Call search_josaa_cutoffs with min_closing_rank = X, limit 15.
-   - If they ask NITs → institute filter for National Institute of Technology.
-   - If they ask IIITs → Indian Institute of Information Technology.
-   - Assume OPEN + Gender-Neutral if not given; say that in one line.
-   - Answer as a numbered college list with Quota, Year, CR (and OR if available).
-   - Do not list HS seats unless user asked for home state / HS.
+   - Call search_josaa_cutoffs with: min_closing_rank = X, quota="OS" (All-India), limit 50.
+   - ONLY add HS if user explicitly asked for home state / HS quota.
+   - If they ask NITs → add institute filter for National Institute of Technology.
+   - If they ask IIITs → add institute filter for Indian Institute of Information Technology.
+   - Use NUMBERED LIST ONLY (no markdown table).
+   - Each line MUST be:
+     1. Year R# | Institute | Programme | Quota | Category | Gender | OR – CR
+   - DEFAULTS (shown in preamble):
+     * Quota: OS/AI (All-India) — never include HS rows unless user explicitly asked.
+     * Category: OPEN
+     * Gender: Gender-Neutral
+   - ONE-LINE PREAMBLE: "Assuming OPEN · Gender-Neutral · All-India (OS/AI). Rank ≈ 49000:"
+   - COMPLETE ALL ROWS: Never truncate an institute name or cut mid-table. Finish every row fully.
+   - If mixed programmes (CSE, ECE, Civil, etc.), add note: "[No branch preference → mixed programmes near CR ≈ 49000]".
+   - Prefer recent years (2024–2026).
 
 4) PERCENTILE
    - Only if user gives a percentile (e.g. 98.5%ile) → percentile_to_rank.
