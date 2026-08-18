@@ -750,9 +750,7 @@ function App() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm('Delete this chat?')) {
-                        deleteChat(chat.id);
-                      }
+                      deleteChat(chat.id);
                     }}
                     title="Delete chat"
                     style={{
