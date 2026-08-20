@@ -19,11 +19,14 @@ load_dotenv()
 
 # ====================== DATA LOADING (ONCE) ======================
 
-DATA_PATH = Path(__file__).parent / "josaa_cutoffs.csv"
+PROJECT_DIR = Path(__file__).parent
+DATA_PATH = PROJECT_DIR / "josaa_cutoffs_2026_round5.csv"
 
 
 def _load_josaa_data() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH)
+    # This is the only runtime data source. Use merge_cutoff_csv.py to add
+    # validated crawler output to it before restarting the backend.
+    df = pd.read_csv(DATA_PATH, low_memory=False)
 
     df["opening_rank"] = pd.to_numeric(df["opening_rank"], errors="coerce")
     df["closing_rank"] = pd.to_numeric(df["closing_rank"], errors="coerce")
@@ -37,7 +40,8 @@ def _load_josaa_data() -> pd.DataFrame:
 
 JOSAA_DF = _load_josaa_data()
 print(
-    f"✅ Loaded {len(JOSAA_DF):,} JoSAA records ({JOSAA_DF['year'].min()}–{JOSAA_DF['year'].max()})"
+    f"✅ Loaded {len(JOSAA_DF):,} JoSAA records from {DATA_PATH.name} "
+    f"({JOSAA_DF['year'].min()}–{JOSAA_DF['year'].max()})"
 )
 
 
@@ -241,6 +245,94 @@ PROGRAM_ALIASES = {
     "mathematics and computing": "Mathematics and Computing",
 }
 
+# ====================== INSTITUTE REGION MAPPING ======================
+# Map institute → region for location-based filtering
+# Regions: South, North, Northeast, West, East
+
+INSTITUTE_REGION = {
+    # SOUTH
+    "nit tiruchirappalli": "South",
+    "nit warangal": "South",
+    "nit calicut": "South",
+    "nit surathkal": "South",
+    "nit karnataka": "South",
+    "nit puducherry": "South",
+    "nit andhra": "South",
+    "iit madras": "South",
+    "iit tirupati": "South",
+    "iit palakkad": "South",
+    "iiit hyderabad": "South",
+    "iiit bangalore": "South",
+    "iiit kottayam": "South",
+    "iiit sri city": "South",
+    
+    # NORTH
+    "iit delhi": "North",
+    "iit roorkee": "North",
+    "iit bhu": "North",
+    "iit kanpur": "North",
+    "iit bombay": "West",  # Mumbai, but close to North-West
+    "nit delhi": "North",
+    "nit allahabad": "North",
+    "nit jaipur": "North",
+    "nit kurukshetra": "North",
+    "nit hamirpur": "North",
+    "nit jalandhar": "North",
+    "nit durgapur": "East",  # West Bengal
+    "nit rourkela": "East",  # Odisha
+    "mnnit allahabad": "North",
+    "mnit jaipur": "North",
+    "iiit delhi": "North",
+    "iiit allahabad": "North",
+    "iiit lucknow": "North",
+    "iiit gwalior": "North",
+    
+    # NORTHEAST
+    "iit guwahati": "Northeast",
+    "nit silchar": "Northeast",
+    "nit agartala": "Northeast",
+    "nit meghalaya": "Northeast",
+    "nit manipur": "Northeast",
+    "nit mizoram": "Northeast",
+    "nit nagaland": "Northeast",
+    "nit sikkim": "Northeast",
+    "nit arunachal": "Northeast",
+    "iiit guwahati": "Northeast",
+    
+    # WEST
+    "iit bombay": "West",
+    "iit gandhinagar": "West",
+    "nit raipur": "West",  # Central/West
+    "iiit pune": "West",
+    "iiit vadodara": "West",
+    "iiit una": "West",
+    "iiit surat": "West",
+    
+    # EAST
+    "iit kharagpur": "East",
+    "nit patna": "East",
+    "nit jamshedpur": "East",
+    "nit rourkela": "East",
+    "nit durgapur": "East",
+    "iiit jabalpur": "East",  # Madhya Pradesh
+    "iiit ranchi": "East",
+    "iiit bhagalpur": "East",
+    
+    # NORTHWEST / HIMALAYAN
+    "iit mandi": "North",
+    "iit ropar": "North",
+    "nit srinagar": "North",
+    "nit uttarakhand": "North",
+}
+
+def get_institute_region(institute_name: str) -> str:
+    """Return region for an institute, or 'Unknown' if not mapped."""
+    normalized = institute_name.lower().replace(",", "").strip()
+    for key, region in INSTITUTE_REGION.items():
+        if key in normalized or normalized in key:
+            return region
+    return "Unknown"
+
 
 # ====================== TOOLS ======================
 
@@ -256,15 +348,23 @@ def search_josaa_cutoffs(
     gender: Optional[str] = None,
     max_closing_rank: Optional[int] = None,
     min_closing_rank: Optional[int] = None,
-    limit: int = 50,
+    limit: int = 100,
 ) -> str:
     """
     Search real JoSAA opening & closing ranks (2016–2026).
+    Always returns NUMBERED LIST format (no tables, all columns visible).
 
     Use this tool for ANY question about colleges, branches, cutoffs, ranks, categories, years, quotas.
     When the user asks "what can I get with rank X", ALWAYS set min_closing_rank = X.
-    For specific college+branch questions, limit=50 gives full coverage (all quotas, categories, genders).
-    For rank-range searches, limit=50 shows top 50 colleges user can get into.
+    For specific college+branch questions, the complete latest final-round result
+    set is returned (all quotas, categories and genders) up to 100 rows.
+    For rank-range searches, limit=25 shows top 25 colleges user can realistically get into.
+    
+    OUTPUT FORMAT:
+      1. Year R# | Institute | Program | Quota | Category | Gender | OR – CR
+    
+    If total exceeds the requested limit, user can ask "more" for the next batch.
+    Each line shows ALL fields (nothing hidden).
     """
     print("SEARCH ARGS:", institute, program, year, round, category, quota, gender, min_closing_rank, max_closing_rank)
     try:
@@ -300,6 +400,16 @@ def search_josaa_cutoffs(
             df = df[df["closing_rank"] <= max_closing_rank]
         if min_closing_rank is not None:
             df = df[df["closing_rank"] >= min_closing_rank]
+
+        # A query for one institute and one programme normally means "show me
+        # all current cutoffs", not every historical round.  Restrict it to
+        # the latest available year and its final published round so the user
+        # receives a complete, usable category/quota/gender grid.
+        if institute and program and year is None and round is None and not df.empty:
+            latest_year = df["year"].max()
+            df = df[df["year"] == latest_year]
+            final_round = df["round"].max()
+            df = df[df["round"] == final_round]
 
         total = len(df)
         if total == 0:
@@ -344,16 +454,18 @@ def search_josaa_cutoffs(
         result_df = df[cols].head(limit)
 
         lines = [
-            f"Found {total} matching rows "
-            f"(showing top {len(result_df)} by latest year/round, preferring non-PwD & OPEN):\n"
+            f"Found {total} matching rows (showing top {len(result_df)} by latest year/round):\\n"
         ]
-        for _, row in result_df.iterrows():
+        for i, (_, row) in enumerate(result_df.iterrows(), start=1):
             orank = int(row["opening_rank"]) if pd.notna(row["opening_rank"]) else "N/A"
             crank = int(row["closing_rank"])
             lines.append(
-                f"• {row['year']} R{row['round']} | {row['institute']} | {row['academic_program']} | "
+                f"{i}. {row['year']} R{row['round']} | {row['institute']} | {row['academic_program']} | "
                 f"{row['quota']} | {row['seat_type']} | {row['gender']} | OR {orank} – CR {crank}"
             )
+        
+        if total > limit:
+            lines.append(f"\\n[Showing {limit} of {total} results. Ask 'more' to see the next batch.]")
 
         return "\n".join(lines)
 
@@ -552,19 +664,70 @@ tools = [search_josaa_cutoffs, percentile_to_rank, build_choice_list]
 # ====================== LLM ======================
 
 llm = ChatGroq(
-    model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+    # Keep this configurable for local development and deployment. The old
+    # llama-3.1-70b-versatile model was retired by Groq.
+    model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
     temperature=0.1,
     api_key=os.getenv("GROQ_API_KEY") or os.getenv("API_key"),
 )
 
 llm_with_tools = llm.bind_tools(tools)
 
-SYSTEM_PROMPT = """You are an expert JEE Main + JoSAA Admission Counselor.
+LEGACY_SYSTEM_PROMPT = """You are an expert JEE Main + JoSAA Admission Counselor.
 You only use tool results for ranks and cutoffs. Never invent numbers.
 
-═══════════════════════════════════════
+═══════════════════════════════════════════════════════════════════════════════
+GUIDED INTAKE FLOW ("what can I get?" / "best colleges for me?")
+═══════════════════════════════════════════════════════════════════════════════
+
+BEFORE showing a long college list, ASK for missing info:
+
+1) DETECT INTENT:
+   - Keywords: "what colleges can I get", "best colleges for me", "which NITs", "colleges for rank X"
+   - If all of [rank, branch, location] already given → SKIP to tool call
+   - If any missing → ASK ONLY the missing ones (don't re-ask what they said)
+
+2) ASK (if missing):
+   a) Rank / AIR:
+      "What is your JEE Main All India Rank (AIR)?"
+      - If they give percentile instead → use percentile_to_rank tool first
+   
+   b) Branch Preference:
+      "Any branch preference? E.g. CSE only, or 'CSE > ECE > any', or 'any branch'"
+      - Default: "any branch" (show mixed colleges)
+      - Store as ordered list if specified (e.g. "CSE, ECE, IT")
+   
+   c) Location / Region:
+      "Location preference? South / North / Northeast / West / East / specific state or city / anywhere?"
+      - South: NIT Trichy, Calicut, Warangal, Surathkal, Puducherry, IIT Madras, IIIT Hyderabad, Bangalore
+      - North: IIT Delhi, Roorkee, Kanpur, NIT Delhi, Jaipur, Kurukshetra, IIIT Delhi, Allahabad
+      - Northeast: IIT Guwahati, NIT Silchar, Agartala, Meghalaya, Manipur
+      - West: IIT Bombay, Gandhinagar, IIIT Pune, Vadodara, Surat
+      - East: IIT Kharagpur, NIT Patna, Jamshedpur, Rourkela
+      - Default: "anywhere" (no location filter)
+   
+   d) Quota (rarely asked first):
+      - Default: OS/AI (All-India quotas) — do NOT include HS unless user explicitly asks
+      - Only ask if they mention "home state" or "HS"
+      - Never assume HS
+
+3) DO NOT ASK IF ALREADY PROVIDED:
+   - If user says "Rank 45000, CSE, South" → they gave everything. Call tool immediately.
+   - Do NOT re-ask any of those fields.
+
+4) CALL TOOL with context:
+   - Use: search_josaa_cutoffs or build_choice_list
+   - Set: min_closing_rank = user's rank, quota="OS" (default), branch filter if specified
+   - Add region filter (South/North/etc) if needed (post-process results)
+   - If location="anywhere" → no region filter
+
+5) OUTPUT: Numbered List ONLY (no markdown tables)
+   Format: 1. Year R# | Institute | Program | Quota | Category | Gender | OR – CR
+   Organize by: branch match → region → stronger options first → lowest CR
+
+═══════════════════════════════════════════════════════════════════════════════
 RESPONSE RULES (always follow)
-═══════════════════════════════════════
+═══════════════════════════════════════════════════════════════════════════════
 
 1) CHOICE / PREFERENCE LIST
    - Keywords: choice list, preference order, what to fill, JoSAA form, build my choices
@@ -579,36 +742,42 @@ RESPONSE RULES (always follow)
    - Do NOT prioritise HS unless the user asked for HS / home state.
 
 2) CUTOFF / COLLEGE SEARCH ANSWERS — FOR SPECIFIC COLLEGE+BRANCH
-   - Call search_josaa_cutoffs ONCE with limit=50 for specific college+branch queries (e.g. "NIT Trichy CSE").
+   - Call search_josaa_cutoffs ONCE with limit=100 for every specific college+branch query.
+   - Return EVERY row from the tool's latest final-round result. Do not omit PwD, HS, Female-only, quota, or category rows.
+   - This applies to every institute and programme, not only NIT Trichy CSE.
    - NEVER reply with only one number ("the cutoff is 1449") or summarize to just 5 rows.
-   - Use NUMBERED LIST ONLY (no markdown table — tables break in your UI).
-   - Each line MUST be pipe-delimited:
-     Year R# | Institute | Program | Quota | Category | Gender | OR – CR
-     Example: 1. 2026 R4 | NIT Trichy | CSE | OS | OPEN | Gender-Neutral | OR 103 – CR 1317
+   - **USE NUMBERED LIST ONLY** (no markdown table — nothing hidden, all columns visible).
+   - Each line MUST be pipe-delimited with ALL fields:
+     1. Year R# | Institute | Program | Quota | Category | Gender | OR – CR
+     Example: 1. 2026 R4 | NIT Trichy | CSE | OS | OPEN | GN | OR 103 – CR 1317
    - COMPLETE useful detail: For specific college+branch, show:
      * Latest year: ALL main quotas (OS, HS) and ALL categories (OPEN, EWS, OBC-NCL, SC, ST)
      * ALL genders (Gender-Neutral, Female-only) when present, across ALL rounds if available
      * Include prior year (e.g. 2025) OPEN OS for comparison if tool returned it
      * Do NOT drop any row (OPEN, OS/HS, categories) to keep it "short"
    - Organize by: latest year first → round (R1 to R6) → quota (OS/HS) → category.
+   - **PAGINATION**: If total exceeds the returned rows, state exactly how many were shown and ask the user to request more.
+   - Use abbreviations (GN = Gender-Neutral) to keep line width under 120 chars.
    - Prefer recent years (2024–2026). Omit year in tool call unless user specified one.
 
 3) RANK QUESTIONS ("what can I get with rank X")
-   - Call search_josaa_cutoffs with: min_closing_rank = X, quota="OS" (All-India), limit 50.
+   - FIRST: Check if rank/branch/location complete. If missing → ASK (use GUIDED INTAKE FLOW)
+   - If complete → Call search_josaa_cutoffs with: min_closing_rank = X, quota="OS" (All-India), limit=25 (NOT higher!).
    - ONLY add HS if user explicitly asked for home state / HS quota.
    - If they ask NITs → add institute filter for National Institute of Technology.
    - If they ask IIITs → add institute filter for Indian Institute of Information Technology.
-   - Use NUMBERED LIST ONLY (no markdown table).
-   - Each line MUST be:
-     1. Year R# | Institute | Programme | Quota | Category | Gender | OR – CR
+   - **USE NUMBERED LIST ONLY** (no markdown table, no bullet points, nothing hidden).
+   - **Every line MUST show all fields** (Quota, Category, Gender, OR, CR).
+   - Line format:
+     1. 2026 R4 | Institute Name | Program | Quota | Category | Gender | OR X – CR Y
    - DEFAULTS (shown in preamble):
      * Quota: OS/AI (All-India) — never include HS rows unless user explicitly asked.
      * Category: OPEN
      * Gender: Gender-Neutral
-   - ONE-LINE PREAMBLE: "Assuming OPEN · Gender-Neutral · All-India (OS/AI). Rank ≈ 49000:"
-   - COMPLETE ALL ROWS: Never truncate an institute name or cut mid-table. Finish every row fully.
+   - ONE-LINE PREAMBLE: "Assuming OPEN · Gender-Neutral · OS/AI | Rank ≈ 49000:" (add branch/location if specified)
+   - **PAGINATION**: If total > 25, end with: "[Showing 25 of XXX. Ask 'more' for next batch.]"
+   - **ABBREVIATE**: Use GN for Gender-Neutral, short institute names, keep lines under 120 chars.
    - If mixed programmes (CSE, ECE, Civil, etc.), add note: "[No branch preference → mixed programmes near CR ≈ 49000]".
-   - Prefer recent years (2024–2026).
 
 4) PERCENTILE
    - Only if user gives a percentile (e.g. 98.5%ile) → percentile_to_rank.
@@ -621,6 +790,28 @@ RESPONSE RULES (always follow)
 
 Tone: direct, clear, student-friendly. Cutoffs change every year — one short disclaimer is enough.
 """
+
+# The model receives this prompt on every tool-call step. Keep it short so a
+# complete official cutoff grid can fit within the configured Groq TPM budget.
+SYSTEM_PROMPT = """You are a JEE Main and JoSAA admission counselor. Use tool
+results for all ranks and cutoffs; never invent values.
+
+Specific institute + programme cutoff query: call search_josaa_cutoffs once
+with limit=100. The tool selects the latest final available round unless the
+user requests a year/round. Return every tool row, exactly once, as numbered
+pipe-delimited lines: Year R# | Institute | Program | Quota | Category | Gender
+| OR x - CR y. Never summarize, omit categories, or make a broken table. If
+the tool says results are paginated, state that clearly.
+
+Rank question: ask only for missing rank, branch preference, and location;
+do not ask quota. Default to OS/AI, OPEN, Gender-Neutral. For a complete
+request, call search_josaa_cutoffs with min_closing_rank and limit=25.
+
+Choice list: call build_choice_list once; ask for missing rank, ordered
+courses, HS/All-India preference, and stronger/safer preference.
+
+Percentile only: call percentile_to_rank. Do not use it when an AIR is given.
+Be direct and student-friendly. One short cutoff disclaimer is enough."""
 
 
 def agent_node(state: AgentState):

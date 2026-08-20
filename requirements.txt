@@ -10,3 +10,5 @@ fastapi
 uvicorn
 groq
 langchain-groq==0.3.7
+requests
+beautifulsoup4

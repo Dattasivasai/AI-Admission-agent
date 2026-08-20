@@ -18,6 +18,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
+import agentLogo from './assets/agent-logo.png';
 
 interface Message {
   role: 'user' | 'agent';
@@ -684,20 +685,17 @@ function App() {
             whiteSpace: 'nowrap',
           }}
         >
-          <div
+          <img
+            src={agentLogo}
+            alt="AI Counselor logo"
             style={{
               width: '34px',
               height: '34px',
-              display: 'grid',
-              placeItems: 'center',
+              objectFit: 'cover',
               borderRadius: '10px',
               marginRight: '10px',
-              background: colors.accentSoft,
-              fontSize: '19px',
             }}
-          >
-            🎓
-          </div>
+          />
           <div style={{ fontSize: '17px', fontWeight: 700 }}>AI Counselor</div>
         </div>
 

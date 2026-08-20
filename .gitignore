@@ -9,3 +9,8 @@ frontend/dist/
 
 .env
 .env.local
+
+# Generated JoSAA crawl artifacts; source CSVs tracked at repository root remain untouched.
+data/raw/
+data/normalized/
+data/reports/

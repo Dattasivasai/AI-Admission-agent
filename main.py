@@ -70,6 +70,12 @@ class Query(BaseModel):
     history: Optional[List[HistoryMessage]] = []
 
 
+# Keep requests below the LLM provider's TPM limit. The browser holds the full
+# transcript; the agent needs only recent conversational context.
+MAX_HISTORY_MESSAGES = 2
+MAX_HISTORY_CONTENT_CHARS = 800
+
+
 # ====================== ROUTES ======================
 
 
@@ -82,11 +88,12 @@ async def home():
 async def chat(query: Query):
     messages = []
 
-    for msg in query.history or []:
+    for msg in (query.history or [])[-MAX_HISTORY_MESSAGES:]:
+        content = (msg.content or "")[-MAX_HISTORY_CONTENT_CHARS:]
         if msg.role == "user":
-            messages.append(HumanMessage(content=msg.content))
+            messages.append(HumanMessage(content=content))
         elif msg.role == "agent":
-            messages.append(AIMessage(content=msg.content))
+            messages.append(AIMessage(content=content))
 
     messages.append(HumanMessage(content=query.message))
 
