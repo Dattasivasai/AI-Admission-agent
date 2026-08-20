@@ -1,6 +1,7 @@
 import logging
 import sys
 import json
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from langchain_core.messages import HumanMessage, AIMessage
 
-from agent import app as agent_graph
+from agent import app as agent_graph, get_college_overview
 
 # ====================== LOGGING ======================
 
@@ -72,8 +73,23 @@ class Query(BaseModel):
 
 # Keep requests below the LLM provider's TPM limit. The browser holds the full
 # transcript; the agent needs only recent conversational context.
-MAX_HISTORY_MESSAGES = 2
-MAX_HISTORY_CONTENT_CHARS = 800
+MAX_HISTORY_MESSAGES = 8
+MAX_HISTORY_CONTENT_CHARS = 400
+
+
+def general_college_query(message: str) -> Optional[str]:
+    """Return the college name for a general-information request, if any."""
+    text = (message or "").strip()
+    lowered = text.lower()
+    if any(word in lowered for word in ("cutoff", "rank", "opening", "closing", "quota", "category", "seat")):
+        return None
+
+    match = re.search(
+        r"(?:tell\s+me\s+(?:something\s+)?about|information\s+(?:about|on)|about)\s+(.+?)[?.!]*$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else None
 
 
 # ====================== ROUTES ======================
@@ -86,6 +102,17 @@ async def home():
 
 @app.post("/chat")
 async def chat(query: Query):
+    college_name = general_college_query(query.message)
+    overview = get_college_overview(college_name) if college_name else None
+
+    if overview:
+        async def overview_generator():
+            yield f"data: {json.dumps({'type': 'token', 'content': overview})}\n\n"
+            yield f"data: {json.dumps({'type': 'end'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        return StreamingResponse(overview_generator(), media_type="text/event-stream")
+
     messages = []
 
     for msg in (query.history or [])[-MAX_HISTORY_MESSAGES:]:

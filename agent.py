@@ -1,6 +1,7 @@
 import os
 import logging
 from pathlib import Path
+from difflib import get_close_matches
 import pandas as pd
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -40,8 +41,8 @@ def _load_josaa_data() -> pd.DataFrame:
 
 JOSAA_DF = _load_josaa_data()
 print(
-    f"✅ Loaded {len(JOSAA_DF):,} JoSAA records from {DATA_PATH.name} "
-    f"({JOSAA_DF['year'].min()}–{JOSAA_DF['year'].max()})"
+    f"Loaded {len(JOSAA_DF):,} JoSAA records from {DATA_PATH.name} "
+    f"({JOSAA_DF['year'].min()}-{JOSAA_DF['year'].max()})"
 )
 
 
@@ -334,12 +335,61 @@ def get_institute_region(institute_name: str) -> str:
     return "Unknown"
 
 
+def get_college_overview(institute_query: str) -> Optional[str]:
+    """Create a short, source-backed college overview from the loaded CSV."""
+    query = institute_query.lower().replace(",", " ").replace("(", " ").replace(")", " ")
+    query_tokens = [token for token in query.split() if len(token) > 2]
+    if not query_tokens:
+        return None
+
+    institute_norm = (
+        JOSAA_DF["institute"].astype(str).str.lower()
+        .str.replace(",", " ", regex=False)
+        .str.replace("(", " ", regex=False)
+        .str.replace(")", " ", regex=False)
+    )
+    # Accept small spelling mistakes such as "Kottaym" → "Kottayam" when
+    # identifying a college for a general information request.
+    vocabulary = {
+        word for name in institute_norm.dropna().unique() for word in name.split()
+    }
+    matches = pd.Series(True, index=JOSAA_DF.index)
+    for token in query_tokens:
+        search_token = token
+        if not institute_norm.str.contains(token, regex=False, na=False).any():
+            close_match = get_close_matches(token, vocabulary, n=1, cutoff=0.82)
+            if close_match:
+                search_token = close_match[0]
+        matches &= institute_norm.str.contains(search_token, regex=False, na=False)
+
+    df = JOSAA_DF[matches].copy()
+    if df.empty:
+        return None
+
+    latest_year = int(df["year"].max())
+    df = df[df["year"] == latest_year]
+    latest_round = int(df["round"].max())
+    df = df[df["round"] == latest_round]
+    institute_name = df["institute"].iloc[0]
+    programmes = sorted(df["academic_program"].dropna().unique())
+
+    lines = [
+        institute_name,
+        f"Available programmes in the official JoSAA {latest_year} Round {latest_round} data:",
+    ]
+    lines.extend(f"- {programme}" for programme in programmes)
+    lines.append("Admissions for these programmes are through JoSAA counselling.")
+    lines.append("Ask for a branch or cutoff if you want the opening and closing ranks.")
+    return "\n".join(lines)
+
+
 # ====================== TOOLS ======================
 
 
 @tool
 def search_josaa_cutoffs(
     institute: Optional[str] = None,
+    institute_type: Optional[str] = None,
     program: Optional[str] = None,
     year: Optional[int] = None,
     round: Optional[int] = None,
@@ -354,7 +404,9 @@ def search_josaa_cutoffs(
     Search real JoSAA opening & closing ranks (2016–2026).
     Always returns NUMBERED LIST format (no tables, all columns visible).
 
-    Use this tool for ANY question about colleges, branches, cutoffs, ranks, categories, years, quotas.
+    Use this tool only for explicit cutoff, rank, branch-admission, category,
+    quota, year, or round questions. Do not use it when a user simply asks
+    "tell me about <college>" without asking for admission cutoffs.
     When the user asks "what can I get with rank X", ALWAYS set min_closing_rank = X.
     For specific college+branch questions, the complete latest final-round result
     set is returned (all quotas, categories and genders) up to 100 rows.
@@ -366,9 +418,23 @@ def search_josaa_cutoffs(
     If total exceeds the requested limit, user can ask "more" for the next batch.
     Each line shows ALL fields (nothing hidden).
     """
-    print("SEARCH ARGS:", institute, program, year, round, category, quota, gender, min_closing_rank, max_closing_rank)
+    print("SEARCH ARGS:", institute, institute_type, program, year, round, category, quota, gender, min_closing_rank, max_closing_rank)
     try:
         df = JOSAA_DF.copy()
+
+        # Keep broad questions such as "Which NIT..." inside the requested
+        # institute group. Filtering by an institute-name substring alone
+        # cannot do this, because a question may not name one college.
+        if institute_type:
+            requested_type = institute_type.strip().upper()
+            if requested_type not in {"IIT", "NIT", "IIIT", "GFTI"}:
+                return "Invalid institute_type. Use IIT, NIT, IIIT, or GFTI."
+            if requested_type == "IIIT":
+                df = df[df["type"].astype(str).str.contains(
+                    "IIIT|Information Technology", case=False, na=False, regex=True
+                )]
+            else:
+                df = df[df["type"].astype(str).str.upper() == requested_type]
 
         if institute:
             inst_lower = institute.lower().strip()
@@ -401,6 +467,16 @@ def search_josaa_cutoffs(
         if min_closing_rank is not None:
             df = df[df["closing_rank"] >= min_closing_rank]
 
+            # A candidate has not supplied category/gender in a rank query.
+            # Show the standard OPEN, Gender-Neutral benchmark rather than
+            # mixing reserved and PwD cutoffs into a general recommendation.
+            if category is None:
+                df = df[df["seat_type"].astype(str).str.upper() == "OPEN"]
+            if gender is None:
+                df = df[df["gender"].astype(str).str.contains(
+                    "Gender-Neutral", case=False, na=False
+                )]
+
         # A query for one institute and one programme normally means "show me
         # all current cutoffs", not every historical round.  Restrict it to
         # the latest available year and its final published round so the user
@@ -415,7 +491,7 @@ def search_josaa_cutoffs(
         if total == 0:
             return (
                 "No matching records found.\n"
-                f"Filters → institute={institute}, program={program}, year={year}, "
+                f"Filters → institute={institute}, institute_type={institute_type}, program={program}, year={year}, "
                 f"category={category}, quota={quota}, gender={gender}, "
                 f"min_closing_rank={min_closing_rank}, max_closing_rank={max_closing_rank}"
             )
@@ -453,9 +529,7 @@ def search_josaa_cutoffs(
         ]
         result_df = df[cols].head(limit)
 
-        lines = [
-            f"Found {total} matching rows (showing top {len(result_df)} by latest year/round):\\n"
-        ]
+        lines = [f"Total matching rows: {total}. Rows displayed now: {len(result_df)}.\\n"]
         for i, (_, row) in enumerate(result_df.iterrows(), start=1):
             orank = int(row["opening_rank"]) if pd.notna(row["opening_rank"]) else "N/A"
             crank = int(row["closing_rank"])
@@ -466,6 +540,8 @@ def search_josaa_cutoffs(
         
         if total > limit:
             lines.append(f"\\n[Showing {limit} of {total} results. Ask 'more' to see the next batch.]")
+
+        lines.append(f"\\nRows displayed in this response: {len(result_df)}.")
 
         return "\n".join(lines)
 
@@ -796,6 +872,9 @@ Tone: direct, clear, student-friendly. Cutoffs change every year — one short d
 SYSTEM_PROMPT = """You are a JEE Main and JoSAA admission counselor. Use tool
 results for all ranks and cutoffs; never invent values.
 
+Use simple Markdown formatting: use bullet points for lists and bold
+subheadings with ** around the heading text. Do not use Markdown tables.
+
 Specific institute + programme cutoff query: call search_josaa_cutoffs once
 with limit=100. The tool selects the latest final available round unless the
 user requests a year/round. Return every tool row, exactly once, as numbered
@@ -803,9 +882,27 @@ pipe-delimited lines: Year R# | Institute | Program | Quota | Category | Gender
 | OR x - CR y. Never summarize, omit categories, or make a broken table. If
 the tool says results are paginated, state that clearly.
 
+For a general question such as “tell me about IIIT Kottayam”, do not call the
+cutoff tool or dump rank rows. Give a short college overview in plain text,
+then offer to show its latest cutoffs if the user wants them. Only show cutoff
+rows when the user explicitly asks for cutoffs, ranks, a branch, category,
+quota, round, or admission chances.
+
 Rank question: ask only for missing rank, branch preference, and location;
-do not ask quota. Default to OS/AI, OPEN, Gender-Neutral. For a complete
-request, call search_josaa_cutoffs with min_closing_rank and limit=25.
+do not ask quota. If the user says “any location”, “no location”, “no
+preference”, or “anywhere”, that completes the location requirement: search
+immediately. Never treat an earlier unknown/typo word as an institute after
+the user says no location.
+
+For “Which NIT(s) ...”, call search_josaa_cutoffs with institute_type="NIT".
+Likewise use IIT, IIIT, or GFTI when the user names one of those groups. For a
+complete rank request call it with min_closing_rank and limit=25. The tool
+defaults a general rank request to OPEN and Gender-Neutral unless the user
+specified otherwise. Never return IITs for an NIT question.
+
+Always preserve the tool's displayed-row count and state it at the end of a
+list. If the user asks how many rows you listed above, answer with that
+displayed-row count; never search or report the total CSV row count.
 
 Choice list: call build_choice_list once; ask for missing rank, ordered
 courses, HS/All-India preference, and stronger/safer preference.
@@ -844,4 +941,4 @@ workflow.add_edge("tools", "agent")
 app = workflow.compile()
 
 if __name__ == "__main__":
-    print("🚀 JEE Admission Agent Ready (Groq + Tools)")
+    print("JEE Admission Agent Ready (Groq + Tools)")

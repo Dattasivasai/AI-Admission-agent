@@ -1,14 +1,8 @@
-﻿langchain
-langgraph
-langchain-community
-langchain-ollama
-langchain-postgres
-psycopg2-binary
-python-dotenv
 pandas
+python-dotenv
 fastapi
 uvicorn
-groq
 langchain-groq==0.3.7
+langgraph>=0.3,<0.4
 requests
 beautifulsoup4

@@ -31,6 +31,16 @@ interface Chat {
   messages: Message[];
 }
 
+function normalizeAgentText(content: string): string {
+  return content
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    // The model can still occasionally return Markdown despite the prompt.
+    // This interface renders plain text, so remove emphasis markers instead
+    // of exposing **word** to students.
+    .replace(/\*+/g, '')
+    .replace(/`([^`]+)`/g, '$1');
+}
+
 const EXAMPLE_PROMPTS = [
   'Which NIT can I get with 25,000 rank?',
   'Show CSE cutoffs for NIT Trichy',
@@ -120,6 +130,7 @@ function App() {
   const hasMessages = Boolean(currentChat?.messages.length);
 
   const renderAgentTable = (content: string) => {
+    content = normalizeAgentText(content);
     const lines = content
       .split('\n')
       .map((line) => line.trim())
@@ -147,7 +158,39 @@ function App() {
       .filter((cells) => cells.length >= 8); // Only valid rows with all 8 columns
 
     const hasTable = rows.length > 0;
-    if (!hasTable) return content;
+    if (!hasTable) {
+      return (
+        <div>
+          {lines.map((line, lineIndex) => {
+            const bulletMatch = line.match(/^\s*[-*+]\s+(.+)$/);
+            const text = bulletMatch ? bulletMatch[1] : line;
+            const parts = text.split(/(\*\*[^*]+\*\*)/g);
+            const formatted = parts.map((part, partIndex) => {
+              if (part.startsWith('**') && part.endsWith('**')) {
+                return <strong key={partIndex}>{part.slice(2, -2)}</strong>;
+              }
+              return part;
+            });
+
+            if (bulletMatch) {
+              return (
+                <div key={lineIndex} style={{ display: 'flex', gap: '8px' }}>
+                  <span aria-hidden="true">•</span>
+                  <span>{formatted}</span>
+                </div>
+              );
+            }
+
+            const isSubheading = /:\s*$/.test(text);
+            return isSubheading ? (
+              <strong key={lineIndex} style={{ display: 'block' }}>{formatted}</strong>
+            ) : (
+              <div key={lineIndex}>{formatted}</div>
+            );
+          })}
+        </div>
+      );
+    }
 
     const headers = ['Year', 'Round', 'Institute', 'Program', 'Quota', 'Category', 'Gender', 'Opening Rank', 'Closing Rank'];
     
