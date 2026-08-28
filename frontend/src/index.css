@@ -61,6 +61,7 @@ body {
   max-width: none;
   border: none;
   text-align: initial;
+  zoom: 1;
 }
 
 button,

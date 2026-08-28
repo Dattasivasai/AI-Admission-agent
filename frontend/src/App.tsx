@@ -41,12 +41,6 @@ function normalizeAgentText(content: string): string {
     .replace(/`([^`]+)`/g, '$1');
 }
 
-const EXAMPLE_PROMPTS = [
-  'Which NIT can I get with 25,000 rank?',
-  'Show CSE cutoffs for NIT Trichy',
-  'Compare IIIT Kottayam and IIIT Sri City',
-];
-
 async function loadUserChats(uid: string): Promise<Chat[]> {
   const q = query(
     collection(db, 'users', uid, 'chats'),
@@ -95,6 +89,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [thinkMode, setThinkMode] = useState(false);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -123,7 +118,7 @@ function App() {
   }, [profileOpen]);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const currentChat = chats.find((chat) => chat.id === currentChatId);
@@ -292,10 +287,9 @@ function App() {
         try {
           const userChats = await loadUserChats(currentUser.uid);
           setChats(userChats);
-          
-          // Restore last used chat from localStorage
+
           const lastChatId = localStorage.getItem(`lastChat_${currentUser.uid}`);
-          if (lastChatId && userChats.some((c) => c.id === lastChatId)) {
+          if (lastChatId && userChats.some((chat) => chat.id === lastChatId)) {
             setCurrentChatId(lastChatId);
           } else {
             setCurrentChatId(null);
@@ -371,6 +365,9 @@ function App() {
   // ChatGPT-style New Chat
   const startNewChat = () => {
     setCurrentChatId(null);
+    if (user) {
+      localStorage.removeItem(`lastChat_${user.uid}`);
+    }
     setInput('');
     if (isMobile) setSidebarOpen(false);
     inputRef.current?.focus();
@@ -391,11 +388,6 @@ function App() {
     if (user) {
       void removeChat(user.uid, chatId);
     }
-  };
-
-  const selectPrompt = (prompt: string) => {
-    setInput(prompt);
-    inputRef.current?.focus();
   };
 
   const stopGenerating = () => {
@@ -675,12 +667,41 @@ function App() {
     }
   };
 
-  const handleInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+  const handleInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void sendMessage();
     }
   };
+
+  useEffect(() => {
+    const handleShortcut = (event: globalThis.KeyboardEvent) => {
+      const commandKey = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+
+      if (commandKey && key === 'n') {
+        event.preventDefault();
+        startNewChat();
+      }
+
+      if (commandKey && key === 'b') {
+        event.preventDefault();
+        setSidebarOpen((open) => !open);
+      }
+
+      if (commandKey && key === 'k') {
+        event.preventDefault();
+        inputRef.current?.focus();
+      }
+
+      if (event.key === 'Escape' && sidebarOpen) {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [sidebarOpen]);
 
   const buttonReset: CSSProperties = {
     border: 'none',
@@ -707,8 +728,8 @@ function App() {
           left: 0,
           bottom: 0,
           zIndex: isMobile ? 40 : 'auto',
-          width: sidebarOpen ? '248px' : '0',
-          minWidth: sidebarOpen ? '248px' : '0',
+          width: sidebarOpen ? (isMobile ? 'min(78vw, 320px)' : '250px') : '0',
+          minWidth: sidebarOpen ? (isMobile ? 'min(78vw, 320px)' : '250px') : '0',
           overflow: 'hidden',
           background: colors.sidebarBackground,
           borderRight: sidebarOpen ? `1px solid ${colors.border}` : 'none',
@@ -720,68 +741,81 @@ function App() {
       >
         <div
           style={{
-            height: '64px',
+            height: '60px',
             padding: '0 18px',
             display: 'flex',
             alignItems: 'center',
-            borderBottom: `1px solid ${colors.border}`,
+            justifyContent: 'space-between',
             whiteSpace: 'nowrap',
           }}
         >
-          <img
-            src={agentLogo}
-            alt="AI Counselor logo"
-            style={{
-              width: '34px',
-              height: '34px',
-              objectFit: 'cover',
-              borderRadius: '10px',
-              marginRight: '10px',
-            }}
-          />
-          <div style={{ fontSize: '17px', fontWeight: 700 }}>AI Counselor</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <img
+              src={agentLogo}
+              alt="AI Counselor logo"
+              style={{ width: '31px', height: '31px', objectFit: 'cover', borderRadius: '9px' }}
+            />
+            <div style={{ fontSize: '19px', fontWeight: 750 }}>AI Counselor</div>
+            {/* <span style={{ color: colors.textMuted, fontSize: '17px' }}></span> */}
+          </div>
+          {/* <span style={{ color: colors.textMuted, fontSize: '20px' }}>⌕</span> */}
         </div>
 
-        <div style={{ padding: '14px 12px 10px' }}>
+        <div style={{ padding: '4px 16px 14px' }}>
           <button
             type="button"
             onClick={startNewChat}
+            className="shortcut-tooltip"
+            data-shortcut="Ctrl+N"
+            aria-label="New chat (Ctrl+N)"
             style={{
               ...buttonReset,
               width: '100%',
-              minHeight: '42px',
+              minHeight: '46px',
               padding: '10px 14px',
               borderRadius: '10px',
-              background: colors.elevatedBackground,
-              border: `1px solid ${colors.border}`,
+              background: 'transparent',
+              border: 'none',
               color: colors.textPrimary,
               fontSize: '14px',
               fontWeight: 600,
               cursor: 'pointer',
               textAlign: 'left',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
             }}
           >
-            ＋ New chat
+            <span><span style={{ marginRight: '13px', fontSize: '20px' }}>♧</span>New chat</span>
+            <span style={{ color: colors.textMuted, fontSize: '20px' }}>⊕</span>
           </button>
         </div>
 
         <div
           style={{
-            padding: '14px 18px 8px',
+            marginTop: 'clamp(50px, 12vh, 160px)',
+            padding: '18px 16px 10px',
             color: colors.textMuted,
-            fontSize: '12px',
+            fontSize: '13px',
             fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
           }}
         >
-          Recent chats
+          Recents&nbsp; ›
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
+        <div
+          className="sidebar-chat-list"
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '4px 16px 16px',
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
+          }}
+        >
           {chats.length === 0 ? (
-            <div style={{ padding: '14px 10px', color: colors.textMuted, fontSize: '13px' }}>
-              Your conversations will appear here.
+            <div style={{ padding: '10px 0', color: colors.textMuted, fontSize: '14px' }}>
+              No chats
             </div>
           ) : (
             chats.map((chat) => {
@@ -798,11 +832,9 @@ function App() {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     marginBottom: '4px',
-                    borderRadius: '9px',
-                    background: isActive ? colors.accentSoft : 'transparent',
-                    borderLeft: isActive
-                      ? `3px solid ${colors.accent}`
-                      : '3px solid transparent',
+                    borderRadius: '11px',
+                    background: isActive ? '#303136' : 'transparent',
+                    borderLeft: 'none',
                     paddingRight: '4px',
                   }}
                 >
@@ -816,7 +848,7 @@ function App() {
                     style={{
                       ...buttonReset,
                       flex: 1,
-                      padding: '11px 12px',
+                      padding: '10px 8px 10px 0',
                       paddingRight: '8px',
                       background: 'transparent',
                       color: isActive ? colors.textPrimary : colors.textSecondary,
@@ -870,6 +902,24 @@ function App() {
             })
           )}
         </div>
+
+        <div
+          style={{
+            minHeight: '64px',
+            padding: '0 20px',
+            borderTop: `1px solid ${colors.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}
+        >
+          <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: colors.accent, display: 'grid', placeItems: 'center', fontSize: '12px', fontWeight: 700 }}>
+            {(user?.displayName || user?.email || 'AI')[0].toUpperCase()}
+          </div>
+          <span style={{ color: colors.textPrimary, fontSize: '15px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user?.displayName || user?.email || 'AI Counselor'}
+          </span>
+        </div>
       </aside>
       {isMobile && sidebarOpen && (
         <div
@@ -888,6 +938,7 @@ function App() {
         style={{
           flex: 1,
           minWidth: 0,
+          position: 'relative',
           display: 'flex',
           flexDirection: 'column',
           background: colors.mainBackground,
@@ -895,8 +946,8 @@ function App() {
       >
         <header
           style={{
-            height: '64px',
-            minHeight: '64px',
+            height: '52px',
+            minHeight: '52px',
             padding: isMobile ? '0 12px' : '0 22px',
             background: colors.sidebarBackground,
             borderBottom: `1px solid ${colors.border}`,
@@ -911,6 +962,9 @@ function App() {
             <button
               type="button"
               onClick={() => setSidebarOpen((p) => !p)}
+              className="shortcut-tooltip"
+              data-shortcut="Ctrl+B"
+              aria-label={`${sidebarOpen ? 'Close' : 'Open'} sidebar (Ctrl+B)`}
               style={{
                 ...buttonReset,
                 width: '36px',
@@ -1151,6 +1205,7 @@ function App() {
         >
           {!hasMessages ? (
             <div
+              className="composer-shell"
               style={{
                 width: '100%',
                 minHeight: '100%',
@@ -1164,22 +1219,23 @@ function App() {
               <div
                 style={{
                   width: '100%',
-                  maxWidth: '760px',
+                  maxWidth: '1200px',
                   textAlign: 'center',
-                  transform: 'translateY(-28px)',
+                  // The empty screen follows the focused composer layout.
+                  transform: 'translateY(-140px)',
                 }}
               >
                 <div
                   style={{
-                    width: '58px',
-                    height: '58px',
+                    width: '38px',
+                    height: '38px',
                     margin: '0 auto 22px',
                     borderRadius: '18px',
                     display: 'grid',
                     placeItems: 'center',
                     background: colors.accentSoft,
                     border: '1px solid rgba(124, 58, 237, 0.25)',
-                    fontSize: '27px',
+                    fontSize: '18px',
                   }}
                 >
                   ✦
@@ -1187,70 +1243,31 @@ function App() {
 
                 <h1
                   style={{
-                    margin: 0,
-                    fontSize: 'clamp(27px, 4vw, 36px)',
-                    lineHeight: 1.2,
-                    letterSpacing: '-0.04em',
+                    margin: '0 auto 18px',
+                    color: colors.textPrimary,
+                    fontSize: 'clamp(20px, 2vw, 28px)',
+                    lineHeight: 1.08,
                     fontWeight: 750,
+                    letterSpacing: '-0.03em',
+                    textAlign: 'center',
                   }}
                 >
                   Plan your Admission journey
                 </h1>
-
                 <p
                   style={{
-                    maxWidth: '620px',
-                    margin: '16px auto 0',
+                    width: '100%',
+                    maxWidth: '1200px',
+                    margin: '0 auto',
                     color: colors.textSecondary,
-                    fontSize: '16px',
-                    lineHeight: 1.7,
+                    fontSize: 'clamp(11px, 1vw, 13px)',
+                    lineHeight: 1.55,
+                    textAlign: 'center',
                   }}
                 >
-                  Get personalized guidance about JoSAA cutoffs, colleges,
-                  branches and admission possibilities based on your rank.
+                  Get personalized guidance about JoSAA cutoffs, colleges, branches and admission possibilities based on your rank.
                 </p>
 
-                <div
-                  style={{
-                    marginTop: '32px',
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-                    gap: '12px',
-                  }}
-                >
-                  {EXAMPLE_PROMPTS.map((prompt) => (
-                    <button
-                      type="button"
-                      key={prompt}
-                      onClick={() => selectPrompt(prompt)}
-                      style={{
-                        ...buttonReset,
-                        minHeight: '88px',
-                        padding: '15px',
-                        borderRadius: '14px',
-                        background: colors.elevatedBackground,
-                        border: `1px solid ${colors.border}`,
-                        color: colors.textSecondary,
-                        textAlign: 'left',
-                        fontSize: '13px',
-                        lineHeight: 1.55,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <span
-                        style={{
-                          display: 'block',
-                          marginBottom: '7px',
-                          color: colors.accent,
-                          fontSize: '16px',
-                        }}
-                      >
-                        ↗
-                      </span>
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           ) : (
@@ -1327,21 +1344,63 @@ function App() {
         </div>
 
         {/* Input */}
-        <div style={{ padding: '14px 24px 22px', background: colors.mainBackground }}>
-          <div style={{ width: '100%', maxWidth: '740px', margin: '0 auto' }}>
+        <div
+          style={{
+            padding: '14px 24px 22px',
+            background: colors.mainBackground,
+            position: hasMessages ? 'relative' : 'absolute',
+            left: hasMessages ? undefined : 0,
+            right: hasMessages ? undefined : 0,
+            top: hasMessages ? undefined : '54%',
+            transform: hasMessages ? undefined : 'translateY(-50%)',
+            zIndex: 5,
+          }}
+        >
+          <div style={{ width: 'calc(100% - 48px)', maxWidth: '680px', margin: '0 auto' }}>
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                padding: '4px',
-                borderRadius: '18px',
+                gap: '12px',
+                minHeight: '54px',
+                padding: '3px 10px',
+                borderRadius: '27px',
                 background: colors.inputBackground,
                 border: `1px solid ${colors.border}`,
                 boxShadow: '0 12px 35px rgba(0, 0, 0, 0.28)',
               }}
             >
-              <input
+              <button
+                type="button"
+                aria-label="Add to message"
+                title="Add to message"
+                onClick={() => inputRef.current?.focus()}
+                style={{
+                  ...buttonReset,
+                  width: '48px',
+                  height: '48px',
+                  flexShrink: 0,
+                  borderRadius: '50%',
+                  background: 'transparent',
+                  color: colors.textPrimary,
+                  cursor: 'pointer',
+                  fontSize: '32px',
+                  fontWeight: 300,
+                  lineHeight: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'flex-start',
+                  padding: '0 0 0 2px',
+                  boxSizing: 'border-box',
+                  transform: 'translate(4px, -3px)',
+                  marginRight: '-21px',
+                }}
+              >
+                +
+              </button>
+
+              <textarea
+                className="composer-input"
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -1351,25 +1410,59 @@ function App() {
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  padding: '10px 14px',
+                  padding: '2px 8px 2px 2px',
                   border: 'none',
                   outline: 'none',
                   background: 'transparent',
                   color: colors.textPrimary,
                   fontFamily: 'inherit',
                   fontSize: '16px',
+                  resize: 'none',
+                  height: '34px',
+                  minHeight: '34px',
+                  maxHeight: '120px',
+                  lineHeight: '22px',
+                  textAlign: 'left',
+                  transform: 'translateY(3px)',
                 }}
               />
+
+              <button
+                type="button"
+                className="think-control"
+                aria-pressed={thinkMode}
+                aria-label={`${thinkMode ? 'Disable' : 'Enable'} Think mode`}
+                title="Think mode"
+                onClick={() => setThinkMode((enabled) => !enabled)}
+                style={{
+                  ...buttonReset,
+                  minWidth: '78px',
+                  height: '34px',
+                  flexShrink: 0,
+                  padding: '0 14px',
+                  borderRadius: '17px',
+                  background: thinkMode ? colors.accentSoft : 'transparent',
+                  color: thinkMode ? colors.textPrimary : colors.textSecondary,
+                  border: thinkMode ? `1px solid ${colors.border}` : '1px solid transparent',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                }}
+              >
+                ✦ Think
+              </button>
 
               {isCurrentChatLoading ? (
                 <button
                   type="button"
                   onClick={stopGenerating}
-                  title="Stop"
+                  className="shortcut-tooltip"
+                  data-shortcut="Stop"
+                  aria-label="Stop generating"
                   style={{
                     ...buttonReset,
-                    width: '42px',
-                    height: '42px',
+                    width: '34px',
+                    height: '34px',
                     borderRadius: '12px',
                     background: colors.elevatedBackground,
                     border: `1px solid ${colors.border}`,
@@ -1382,8 +1475,8 @@ function App() {
                 >
                   <span
                     style={{
-                      width: '12px',
-                      height: '12px',
+                      width: '10px',
+                      height: '10px',
                       borderRadius: '2px',
                       background: colors.textPrimary,
                       display: 'block',
@@ -1395,12 +1488,15 @@ function App() {
                   type="button"
                   onClick={() => void sendMessage()}
                   disabled={!input.trim()}
+                  className="shortcut-tooltip"
+                  data-shortcut="Enter"
+                  aria-label="Send message (Enter)"
                   style={{
                     ...buttonReset,
-                    minWidth: '94px',
-                    height: '42px',
-                    padding: '0 20px',
-                    borderRadius: '12px',
+                    minWidth: '70px',
+                    height: '34px',
+                    padding: '0 12px',
+                    borderRadius: '17px',
                     background: !input.trim() ? colors.elevatedBackground : colors.accent,
                     color: !input.trim() ? colors.textMuted : '#ffffff',
                     fontSize: '14px',
@@ -1421,6 +1517,7 @@ function App() {
                 textAlign: 'center',
               }}
             >
+              <br />
               AI recommendations may not always match the official JoSAA results.
               Verify important admission information.
             </div>
@@ -1431,6 +1528,69 @@ function App() {
       <style>{`
         @keyframes blink {
           50% { opacity: 0; }
+        }
+
+        .shortcut-tooltip {
+          position: relative;
+        }
+
+        .shortcut-tooltip::after {
+          content: attr(data-shortcut);
+          position: absolute;
+          left: 50%;
+          top: calc(100% + 8px);
+          transform: translate(-50%, -4px);
+          z-index: 100;
+          padding: 6px 9px;
+          border-radius: 7px;
+          background: #f4f4f5;
+          color: #18181b;
+          font-size: 12px;
+          font-weight: 700;
+          white-space: nowrap;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.15s ease, transform 0.15s ease;
+          box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+        }
+
+        .shortcut-tooltip:hover::after,
+        .shortcut-tooltip:focus-visible::after {
+          opacity: 1;
+          transform: translate(-50%, 0);
+        }
+
+        .sidebar-chat-list::-webkit-scrollbar {
+          display: none;
+        }
+
+        .composer-shell:focus-within {
+          border-color: rgba(124, 58, 237, 0.65) !important;
+          box-shadow: 0 12px 35px rgba(0, 0, 0, 0.28), 0 0 0 3px rgba(124, 58, 237, 0.12) !important;
+        }
+
+        .composer-input::placeholder {
+          color: #85858f;
+          opacity: 1;
+        }
+
+        @media (max-width: 600px) {
+          .composer-shell {
+            gap: 4px !important;
+            padding: 4px 6px !important;
+          }
+
+          .composer-shell .think-control {
+            width: 34px !important;
+            min-width: 34px !important;
+            padding: 0 !important;
+            font-size: 0 !important;
+          }
+
+          .composer-shell .think-control::before {
+            content: '✦';
+            font-size: 16px;
+          }
         }
       `}</style>
     </div>
