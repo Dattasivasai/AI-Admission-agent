@@ -288,8 +288,9 @@ function App() {
           const userChats = await loadUserChats(currentUser.uid);
           setChats(userChats);
 
+          const emptyChatRequested = localStorage.getItem(`emptyChat_${currentUser.uid}`) === 'true';
           const lastChatId = localStorage.getItem(`lastChat_${currentUser.uid}`);
-          if (lastChatId && userChats.some((chat) => chat.id === lastChatId)) {
+          if (!emptyChatRequested && lastChatId && userChats.some((chat) => chat.id === lastChatId)) {
             setCurrentChatId(lastChatId);
           } else {
             setCurrentChatId(null);
@@ -367,6 +368,7 @@ function App() {
     setCurrentChatId(null);
     if (user) {
       localStorage.removeItem(`lastChat_${user.uid}`);
+      localStorage.setItem(`emptyChat_${user.uid}`, 'true');
     }
     setInput('');
     if (isMobile) setSidebarOpen(false);
@@ -452,6 +454,9 @@ function App() {
         ...prev,
       ]);
       setCurrentChatId(newChat.id);
+      if (user) {
+        localStorage.removeItem(`emptyChat_${user.uid}`);
+      }
     } else {
       // Existing conversation
       const selected = chats.find((c) => c.id === chatIdToUse);
@@ -842,6 +847,9 @@ function App() {
                     type="button"
                     onClick={() => {
                       setCurrentChatId(chat.id);
+                      if (user) {
+                        localStorage.removeItem(`emptyChat_${user.uid}`);
+                      }
                       if (isMobile) setSidebarOpen(false);
                     }}
                     title={chat.title}
