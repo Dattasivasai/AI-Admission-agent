@@ -90,6 +90,7 @@ function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [thinkMode, setThinkMode] = useState(false);
+  const [showChatList, setShowChatList] = useState(true);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -262,19 +263,19 @@ function App() {
   };
 
   const colors = {
-    mainBackground: '#09090b',
-    sidebarBackground: '#0c0c0f',
-    elevatedBackground: '#18181b',
-    hoverBackground: '#202024',
-    inputBackground: '#18181b',
-    border: 'rgba(255, 255, 255, 0.08)',
-    textPrimary: '#f4f4f5',
-    textSecondary: '#a1a1aa',
-    textMuted: '#71717a',
+    mainBackground: '#000000',
+    sidebarBackground: '#000000',
+    elevatedBackground: '#1a1a1a',
+    hoverBackground: '#262626',
+    inputBackground: '#1a1a1a',
+    border: 'rgba(255, 255, 255, 0.15)',
+    textPrimary: '#ffffff',
+    textSecondary: '#ffffff',
+    textMuted: '#e0e0e0',
     accent: '#7c3aed',
     accentHover: '#6d28d9',
     accentSoft: 'rgba(124, 58, 237, 0.14)',
-    agentMessage: '#18181b',
+    agentMessage: '#1a1a1a',
   };
 
   // Listen for login state + load/clear chats
@@ -796,28 +797,38 @@ function App() {
           </button>
         </div>
 
-        <div
-          style={{
-            marginTop: 'clamp(50px, 12vh, 160px)',
-            padding: '18px 16px 10px',
-            color: colors.textMuted,
-            fontSize: '13px',
-            fontWeight: 700,
-          }}
-        >
-          Recents&nbsp; ›
-        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div
+            onClick={() => setShowChatList(!showChatList)}
+            style={{
+              marginTop: 'clamp(150px, 30vh, 350px)',
+              padding: '18px 16px 10px',
+              color: colors.textMuted,
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              userSelect: 'none',
+              transition: 'color 0.2s',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = colors.textPrimary)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = colors.textMuted)}
+          >
+            Recents&nbsp; <span style={{ display: 'inline-block', transform: showChatList ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.3s' }}>›</span>
+          </div>
 
-        <div
-          className="sidebar-chat-list"
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '4px 16px 16px',
-            scrollbarWidth: 'none',
-            msOverflowStyle: 'none',
-          }}
-        >
+          <div
+            className="sidebar-chat-list"
+            style={{
+              flex: showChatList ? 1 : 0,
+              overflowY: 'auto',
+              padding: '4px 16px 16px',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              display: showChatList ? 'block' : 'none',
+              minHeight: 0,
+            }}
+          >
           {chats.length === 0 ? (
             <div style={{ padding: '10px 0', color: colors.textMuted, fontSize: '14px' }}>
               No chats
@@ -909,6 +920,7 @@ function App() {
               );
             })
           )}
+          </div>
         </div>
 
         <div
@@ -919,6 +931,7 @@ function App() {
             display: 'flex',
             alignItems: 'center',
             gap: '12px',
+            flexShrink: 0,
           }}
         >
           <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: colors.accent, display: 'grid', placeItems: 'center', fontSize: '12px', fontWeight: 700 }}>
