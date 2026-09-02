@@ -73,8 +73,8 @@ class Query(BaseModel):
 
 # Keep requests below the LLM provider's TPM limit. The browser holds the full
 # transcript; the agent needs only recent conversational context.
-MAX_HISTORY_MESSAGES = 8
-MAX_HISTORY_CONTENT_CHARS = 400
+MAX_HISTORY_MESSAGES = 4
+MAX_HISTORY_CONTENT_CHARS = 300
 
 
 def general_college_query(message: str) -> Optional[str]:
@@ -147,11 +147,26 @@ async def chat(query: Query):
 
                 elif kind == "on_tool_end":
                     tool_name = event.get("name", "unknown_tool")
-                    tool_output = str(event.get("data", {}).get("output", ""))[:200]
+                    tool_output_value = event.get("data", {}).get("output", "")
+                    tool_output = ""
+                    if isinstance(tool_output_value, dict):
+                        tool_messages = tool_output_value.get("messages", [])
+                        if tool_messages:
+                            tool_output = str(getattr(tool_messages[-1], "content", ""))
+                    else:
+                        tool_output = str(getattr(tool_output_value, "content", tool_output_value))
                     logger.info(
-                        "tool_end name=%s output_preview=%s", tool_name, tool_output
+                        "tool_end name=%s output_preview=%s", tool_name, tool_output[:200]
                     )
-                    yield f"data: {json.dumps({'type': 'status', 'content': 'Writing answer...'})}\n\n"
+                    # Cutoff rows are already complete, verified CSV data.
+                    # Stream them immediately instead of waiting for a model
+                    # to repeat (and potentially truncate) a long 25-row list.
+                    if tool_output.startswith("Total matching rows:") or tool_output.startswith(
+                        "No matching records found."
+                    ):
+                        yield f"data: {json.dumps({'type': 'token', 'content': tool_output})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'status', 'content': 'Writing answer...'})}\n\n"
 
                 elif kind == "on_chat_model_end":
                     yield f"data: {json.dumps({'type': 'end'})}\n\n"

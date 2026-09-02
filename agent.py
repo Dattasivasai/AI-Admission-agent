@@ -476,6 +476,10 @@ def search_josaa_cutoffs(
                 df = df[df["gender"].astype(str).str.contains(
                     "Gender-Neutral", case=False, na=False
                 )]
+            # NIT counselling recommendations normally use the All-India
+            # (OS) quota unless the student explicitly asked for Home State.
+            if quota is None and institute_type and institute_type.strip().upper() == "NIT":
+                df = df[df["quota"].astype(str).str.upper() == "OS"]
 
         # A query for one institute and one programme normally means "show me
         # all current cutoffs", not every historical round.  Restrict it to
@@ -527,21 +531,46 @@ def search_josaa_cutoffs(
             "opening_rank",
             "closing_rank",
         ]
-        result_df = df[cols].head(limit)
+        # Keep the requested number of results. Rank recommendations normally
+        # request 25 rows, while specific cutoff searches may request more.
+        display_limit = limit
+        result_df = df[cols].head(display_limit)
 
         lines = [f"Total matching rows: {total}. Rows displayed now: {len(result_df)}.\\n"]
+        fit_counts = {"Close match": 0, "Realistic option": 0, "Safer option": 0}
         for i, (_, row) in enumerate(result_df.iterrows(), start=1):
             orank = int(row["opening_rank"]) if pd.notna(row["opening_rank"]) else "N/A"
             crank = int(row["closing_rank"])
+            if min_closing_rank is not None:
+                rank_gap = crank - min_closing_rank
+                if rank_gap <= max(500, int(min_closing_rank * 0.05)):
+                    fit_label = "Close match"
+                elif rank_gap <= int(min_closing_rank * 0.25):
+                    fit_label = "Realistic option"
+                else:
+                    fit_label = "Safer option"
+                fit_counts[fit_label] += 1
             lines.append(
                 f"{i}. {row['year']} R{row['round']} | {row['institute']} | {row['academic_program']} | "
                 f"{row['quota']} | {row['seat_type']} | {row['gender']} | OR {orank} – CR {crank}"
             )
         
-        if total > limit:
-            lines.append(f"\\n[Showing {limit} of {total} results. Ask 'more' to see the next batch.]")
+        if total > display_limit:
+            lines.append(f"\\n[Showing {display_limit} of {total} results. Ask 'more' to see the next batch.]")
 
         lines.append(f"\\nRows displayed in this response: {len(result_df)}.")
+        if min_closing_rank is not None:
+            lines.append(
+                "Guidance: Fit labels compare your rank only with the official closing rank. "
+                "They are not a guarantee of admission; use a mix of close, realistic, and safer options in your choice list."
+            )
+            lines.append(
+                "Summary: "
+                f"{fit_counts['Close match']} close matches, "
+                f"{fit_counts['Realistic option']} realistic options, and "
+                f"{fit_counts['Safer option']} safer options in the displayed list. "
+                "Place realistic and safer options before close matches in your JoSAA choice order."
+            )
 
         return "\n".join(lines)
 
@@ -744,6 +773,8 @@ llm = ChatGroq(
     # llama-3.1-70b-versatile model was retired by Groq.
     model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
     temperature=0.1,
+    # Keep tool-result answers within the provider's request/token limit.
+    max_tokens=800,
     api_key=os.getenv("GROQ_API_KEY") or os.getenv("API_key"),
 )
 
@@ -904,6 +935,12 @@ Always preserve the tool's displayed-row count and state it at the end of a
 list. If the user asks how many rows you listed above, answer with that
 displayed-row count; never search or report the total CSV row count.
 
+After every rank-based college list, add a short “What this means” paragraph.
+Use the tool's Fit labels and Guidance text only: explain that close matches
+are near the candidate's rank, realistic options have more room, and safer
+options have substantially more room. Do not call admission guaranteed.
+End every rank-based answer with the tool's Summary line.
+
 Choice list: call build_choice_list once; ask for missing rank, ordered
 courses, HS/All-India preference, and stronger/safer preference.
 
@@ -913,6 +950,16 @@ Be direct and student-friendly. One short cutoff disclaimer is enough."""
 
 def agent_node(state: AgentState):
     messages = list(state["messages"])
+
+    # A cutoff tool result can contain a complete 25-row shortlist plus its
+    # summary. Asking the model to repeat that data wastes tokens and often
+    # truncates the response midway. Return the verified tool text directly.
+    if messages and isinstance(messages[-1], ToolMessage):
+        tool_result = str(messages[-1].content)
+        if tool_result.startswith("Total matching rows:") or tool_result.startswith(
+            "No matching records found."
+        ):
+            return {"messages": [AIMessage(content=tool_result)]}
 
     # Always ensure system message is first
     if not messages or not isinstance(messages[0], SystemMessage):

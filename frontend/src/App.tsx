@@ -91,6 +91,8 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [thinkMode, setThinkMode] = useState(false);
   const [showChatList, setShowChatList] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState('general');
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -189,18 +191,24 @@ function App() {
     }
 
     const headers = ['Year', 'Round', 'Institute', 'Program', 'Quota', 'Category', 'Gender', 'Opening Rank', 'Closing Rank'];
+    // Keep summary/guidance lines visible after rendering the numbered rows
+    // as a table. Previously this renderer discarded every non-row line.
+    const tableNotes = lines.filter((line) =>
+      /^(Guidance:|Summary:|What this means:|\[Showing|Rows displayed)/i.test(line),
+    );
     
     return (
-      <div style={{ overflowX: 'auto', paddingTop: '4px' }}>
-        <table
-          style={{
-            width: '100%',
-            minWidth: '1200px',
-            borderCollapse: 'collapse',
-            fontSize: '13px',
-            lineHeight: 1.5,
-          }}
-        >
+      <div style={{ paddingTop: '4px' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table
+            style={{
+              width: '100%',
+              minWidth: '1200px',
+              borderCollapse: 'collapse',
+              fontSize: '13px',
+              lineHeight: 1.5,
+            }}
+          >
           <thead>
             <tr>
               {headers.map((header) => (
@@ -257,7 +265,27 @@ function App() {
               );
             })}
           </tbody>
-        </table>
+          </table>
+        </div>
+        {tableNotes.length > 0 && (
+          <div
+            style={{
+              marginTop: '18px',
+              padding: '14px 16px',
+              borderRadius: '12px',
+              background: colors.elevatedBackground,
+              border: `1px solid ${colors.border}`,
+              fontSize: '14px',
+              lineHeight: 1.65,
+            }}
+          >
+            {tableNotes.map((note, index) => (
+              <div key={`${note}-${index}`} style={{ marginTop: index ? '8px' : 0 }}>
+                {note.startsWith('Summary:') ? <strong>{note}</strong> : note}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -1143,7 +1171,7 @@ function App() {
                         type="button"
                         onClick={() => {
                           setProfileOpen(false);
-                          // TODO: open settings
+                          setSettingsOpen(true);
                         }}
                         style={{
                           ...buttonReset,
@@ -1545,6 +1573,221 @@ function App() {
           </div>
         </div>
       </main>
+
+      {/* Settings Modal */}
+      {settingsOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 60,
+          }}
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div
+            style={{
+              width: '90vw',
+              maxWidth: '900px',
+              height: '80vh',
+              maxHeight: '600px',
+              background: colors.sidebarBackground,
+              borderRadius: '16px',
+              display: 'flex',
+              overflow: 'hidden',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.6)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(false)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                left: '16px',
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: colors.elevatedBackground,
+                border: `1px solid ${colors.border}`,
+                color: colors.textSecondary,
+                cursor: 'pointer',
+                fontSize: '20px',
+                display: 'grid',
+                placeItems: 'center',
+                zIndex: 61,
+              }}
+            >
+              ✕
+            </button>
+
+            {/* Settings Sidebar */}
+            <div
+              style={{
+                width: '240px',
+                borderRight: `1px solid ${colors.border}`,
+                overflowY: 'auto',
+                padding: '16px 0',
+              }}
+            >
+              {[
+                { id: 'general', label: 'General', icon: '⚙️' },
+                { id: 'notifications', label: 'Notifications', icon: '🔔' },
+                { id: 'personalization', label: 'Personalization', icon: '🎨' },
+                { id: 'privacy', label: 'Privacy & Security', icon: '🔒' },
+                { id: 'about', label: 'About', icon: 'ℹ️' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveSettingsTab(tab.id)}
+                  style={{
+                    ...buttonReset,
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    fontSize: '14px',
+                    color: activeSettingsTab === tab.id ? colors.accent : colors.textPrimary,
+                    background: activeSettingsTab === tab.id ? colors.elevatedBackground : 'transparent',
+                    borderLeft: activeSettingsTab === tab.id ? `3px solid ${colors.accent}` : '3px solid transparent',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <span style={{ marginRight: '8px' }}>{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Settings Content */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '32px 40px',
+              }}
+            >
+              {activeSettingsTab === 'general' && (
+                <div>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: colors.textPrimary }}>
+                    General
+                  </h2>
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', color: colors.textPrimary }}>
+                      <input type="checkbox" defaultChecked style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                      Compact mode
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'notifications' && (
+                <div>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: colors.textPrimary }}>
+                    Notifications
+                  </h2>
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', color: colors.textPrimary }}>
+                      <input type="checkbox" defaultChecked style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                      Email notifications for new chats
+                    </label>
+                  </div>
+                  <div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', color: colors.textPrimary }}>
+                      <input type="checkbox" style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                      Desktop notifications
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'personalization' && (
+                <div>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: colors.textPrimary }}>
+                    Personalization
+                  </h2>
+                  <div style={{ marginBottom: '20px' }}>
+                    <p style={{ fontSize: '14px', color: colors.textMuted, marginBottom: '8px' }}>Theme</p>
+                    <select
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        background: colors.elevatedBackground,
+                        border: `1px solid ${colors.border}`,
+                        color: colors.textPrimary,
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                      }}
+                      defaultValue="dark"
+                    >
+                      <option value="dark">Dark</option>
+                      <option value="light">Light</option>
+                      <option value="auto">Auto</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'privacy' && (
+                <div>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: colors.textPrimary }}>
+                    Privacy & Security
+                  </h2>
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', color: colors.textPrimary }}>
+                      <input type="checkbox" defaultChecked style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                      Save chat history
+                    </label>
+                  </div>
+                  <div style={{ marginBottom: '20px' }}>
+                    <p style={{ fontSize: '14px', color: colors.textMuted, marginBottom: '8px' }}>Data Retention</p>
+                    <select
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        background: colors.elevatedBackground,
+                        border: `1px solid ${colors.border}`,
+                        color: colors.textPrimary,
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                      }}
+                      defaultValue="30days"
+                    >
+                      <option value="30days">30 days</option>
+                      <option value="90days">90 days</option>
+                      <option value="1year">1 year</option>
+                      <option value="forever">Forever</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'about' && (
+                <div>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: colors.textPrimary }}>
+                    About
+                  </h2>
+                  <div style={{ color: colors.textMuted, lineHeight: '1.6' }}>
+                    <p><strong>AI Admission Assistant</strong></p>
+                    <p style={{ marginTop: '8px' }}>Version 1.0.0</p>
+                    <p style={{ marginTop: '12px', fontSize: '13px' }}>
+                      Your personal admission guidance powered by AI. Get insights about JoSAA cutoffs, colleges, and admission possibilities.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes blink {
