@@ -190,11 +190,11 @@ function App() {
       );
     }
 
-    const headers = ['Year', 'Round', 'Institute', 'Program', 'Quota', 'Category', 'Gender', 'Opening Rank', 'Closing Rank'];
+    const headers = ['Year', 'Round', 'Institute', 'Program', 'Quota', 'Category', 'Gender', 'Opening Rank', 'Closing Rank', 'Fit'];
     // Keep summary/guidance lines visible after rendering the numbered rows
     // as a table. Previously this renderer discarded every non-row line.
     const tableNotes = lines.filter((line) =>
-      /^(Guidance:|Summary:|What this means:|\[Showing|Rows displayed)/i.test(line),
+      /^(Total matching rows:|Guidance:|Summary:|What this means:|\[Showing|Rows displayed)/i.test(line),
     );
     
     return (
@@ -235,16 +235,19 @@ function App() {
               // cells[4]=Quota, cells[5]=Category, cells[6]=Gender, cells[7]=OR–CR
               const [year, round, institute, program, quota, category, gender, rangeStr] = cells;
               
-              // Parse OR–CR from format "OR 103 – CR 1331"
+              // Parse OR–CR from format "OR 103 – CR 1331 [Close match]"
               let orRank = '';
               let crRank = '';
+              // Extract optional fit label: [Close match], [Realistic option], [Safer option]
+              const fitLabelMatch = rangeStr ? rangeStr.match(/\[([^\]]+)\]/) : null;
+              const fitLabel = fitLabelMatch ? fitLabelMatch[1] : (cells[8] || '');
               if (rangeStr) {
                 const match = rangeStr.match(/OR\s*(\d+)\s*[–-]\s*CR\s*(\d+)/);
                 if (match) {
                   orRank = match[1];
                   crRank = match[2];
                 } else {
-                  crRank = rangeStr;
+                  crRank = rangeStr.replace(/\[[^\]]*\]/g, '').trim();
                 }
               }
 
@@ -260,6 +263,19 @@ function App() {
                   <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>{orRank}</td>
                   <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {crRank}
+                  </td>
+                  <td style={{
+                    padding: '4px 8px',
+                    verticalAlign: 'top',
+                    whiteSpace: 'nowrap',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    color: fitLabel === 'Close match' ? '#f59e0b'
+                         : fitLabel === 'Realistic option' ? '#10b981'
+                         : fitLabel === 'Safer option' ? '#6366f1'
+                         : 'inherit',
+                  }}>
+                    {fitLabel}
                   </td>
                 </tr>
               );
@@ -406,16 +422,14 @@ function App() {
 
 
   const deleteChat = (chatId: string) => {
+    if (!window.confirm('Delete this chat? This cannot be undone.')) return;
     setChats((prev) => {
       const updated = prev.filter((c) => c.id !== chatId);
-
       if (chatId === currentChatId) {
         setCurrentChatId(updated.length > 0 ? updated[0].id : null);
       }
-
       return updated;
     });
-
     if (user) {
       void removeChat(user.uid, chatId);
     }
@@ -458,6 +472,8 @@ function App() {
     abortControllerRef.current = controller;
 
     setInput('');
+    // Reset auto-grow height so textarea doesn't stay tall after send
+    if (inputRef.current) inputRef.current.style.height = '34px';
 
     const userMessage: Message = { role: 'user', content: currentInput };
     const optimisticAgentMessage: Message = {
@@ -523,6 +539,7 @@ function App() {
         body: JSON.stringify({
           message: currentInput,
           history: previousMessages,
+          think_mode: thinkMode,
         }),
         signal: controller.signal,
       });
@@ -539,7 +556,7 @@ function App() {
       let fullContent = '';
       let lastUpdate = 0;
 
-      while (true) {
+      outer: while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -620,7 +637,7 @@ function App() {
               }
 
               if (data.type === 'done') {
-                break;
+                break outer;
               }
             } catch (err) {
               console.error('SSE parse error:', err);
@@ -829,7 +846,7 @@ function App() {
           <div
             onClick={() => setShowChatList(!showChatList)}
             style={{
-              marginTop: 'clamp(150px, 30vh, 350px)',
+              marginTop: 'clamp(40px, 8vh, 120px)',
               padding: '18px 16px 10px',
               color: colors.textMuted,
               fontSize: '13px',
@@ -1150,7 +1167,7 @@ function App() {
                         type="button"
                         onClick={() => {
                           setProfileOpen(false);
-                          // TODO: open help
+                          alert('AI Admission Counselor\n\nTry asking:\n- "What can I get with rank 45000?"\n- "NIT Trichy CSE cutoff"\n- "Build my JoSAA choice list for CSE, ECE"\n- "Tell me about IIT Bombay"\n\nData: Official JoSAA 2016-2026 cutoffs.');
                         }}
                         style={{
                           ...buttonReset,
@@ -1421,8 +1438,8 @@ function App() {
             >
               <button
                 type="button"
-                aria-label="Add to message"
-                title="Add to message"
+                aria-label="Suggested prompts"
+                title="Try: 'rank 50000 CSE' or 'NIT Trichy CSE cutoff'"
                 onClick={() => inputRef.current?.focus()}
                 style={{
                   ...buttonReset,
@@ -1452,7 +1469,11 @@ function App() {
                 className="composer-input"
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = '34px';
+                  e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                }}
                 onKeyDown={handleInputKeyDown}
                 placeholder="Ask about rank, college, branch or cutoffs..."
                 disabled={isCurrentChatLoading}

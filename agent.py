@@ -400,25 +400,27 @@ def search_josaa_cutoffs(
     min_closing_rank: Optional[int] = None,
     limit: int = 100,
 ) -> str:
-    """
-    Search real JoSAA opening & closing ranks (2016–2026).
-    Always returns NUMBERED LIST format (no tables, all columns visible).
+    """Search real JoSAA opening & closing ranks (2016-2026).
 
     Use this tool only for explicit cutoff, rank, branch-admission, category,
     quota, year, or round questions. Do not use it when a user simply asks
-    "tell me about <college>" without asking for admission cutoffs.
-    When the user asks "what can I get with rank X", ALWAYS set min_closing_rank = X.
+    'tell me about <college>' without asking for admission cutoffs.
+    When the user asks 'what can I get with rank X', ALWAYS set min_closing_rank = X.
     For specific college+branch questions, the complete latest final-round result
     set is returned (all quotas, categories and genders) up to 100 rows.
     For rank-range searches, limit=25 shows top 25 colleges user can realistically get into.
-    
+
     OUTPUT FORMAT:
-      1. Year R# | Institute | Program | Quota | Category | Gender | OR – CR
-    
-    If total exceeds the requested limit, user can ask "more" for the next batch.
+      1. Year R# | Institute | Program | Quota | Category | Gender | OR - CR [Fit label]
+
     Each line shows ALL fields (nothing hidden).
     """
-    print("SEARCH ARGS:", institute, institute_type, program, year, round, category, quota, gender, min_closing_rank, max_closing_rank)
+    logger.debug(
+        "search_josaa_cutoffs args institute=%s type=%s program=%s year=%s round=%s "
+        "category=%s quota=%s gender=%s min_cr=%s max_cr=%s",
+        institute, institute_type, program, year, round,
+        category, quota, gender, min_closing_rank, max_closing_rank,
+    )
     try:
         df = JOSAA_DF.copy()
 
@@ -464,8 +466,15 @@ def search_josaa_cutoffs(
 
         if max_closing_rank is not None:
             df = df[df["closing_rank"] <= max_closing_rank]
+
         if min_closing_rank is not None:
             df = df[df["closing_rank"] >= min_closing_rank]
+
+            # Cap at a reasonable upper bound so the total count is meaningful.
+            # Without this, rank=49000 matches every college from CR=49000 to
+            # CR=600000+, inflating "Total matching rows" to thousands.
+            auto_max = max_closing_rank if max_closing_rank is not None else min_closing_rank * 3
+            df = df[df["closing_rank"] <= auto_max]
 
             # A candidate has not supplied category/gender in a rank query.
             # Show the standard OPEN, Gender-Neutral benchmark rather than
@@ -495,7 +504,7 @@ def search_josaa_cutoffs(
         if total == 0:
             return (
                 "No matching records found.\n"
-                f"Filters → institute={institute}, institute_type={institute_type}, program={program}, year={year}, "
+                f"Filters -> institute={institute}, institute_type={institute_type}, program={program}, year={year}, "
                 f"category={category}, quota={quota}, gender={gender}, "
                 f"min_closing_rank={min_closing_rank}, max_closing_rank={max_closing_rank}"
             )
@@ -536,8 +545,9 @@ def search_josaa_cutoffs(
         display_limit = limit
         result_df = df[cols].head(display_limit)
 
-        lines = [f"Total matching rows: {total}. Rows displayed now: {len(result_df)}.\\n"]
+        lines = [f"Total matching rows: {total}. Rows displayed now: {len(result_df)}."]
         fit_counts = {"Close match": 0, "Realistic option": 0, "Safer option": 0}
+        fit_label = ""
         for i, (_, row) in enumerate(result_df.iterrows(), start=1):
             orank = int(row["opening_rank"]) if pd.notna(row["opening_rank"]) else "N/A"
             crank = int(row["closing_rank"])
@@ -550,15 +560,16 @@ def search_josaa_cutoffs(
                 else:
                     fit_label = "Safer option"
                 fit_counts[fit_label] += 1
+            label_suffix = f" [{fit_label}]" if min_closing_rank is not None else ""
             lines.append(
                 f"{i}. {row['year']} R{row['round']} | {row['institute']} | {row['academic_program']} | "
-                f"{row['quota']} | {row['seat_type']} | {row['gender']} | OR {orank} – CR {crank}"
+                f"{row['quota']} | {row['seat_type']} | {row['gender']} | OR {orank} - CR {crank}{label_suffix}"
             )
-        
-        if total > display_limit:
-            lines.append(f"\\n[Showing {display_limit} of {total} results. Ask 'more' to see the next batch.]")
 
-        lines.append(f"\\nRows displayed in this response: {len(result_df)}.")
+        if total > display_limit:
+            lines.append(f"[Showing {display_limit} of {total} total results.]")
+
+        lines.append(f"Rows displayed in this response: {len(result_df)}.")
         if min_closing_rank is not None:
             lines.append(
                 "Guidance: Fit labels compare your rank only with the official closing rank. "
@@ -959,7 +970,11 @@ def agent_node(state: AgentState):
         if tool_result.startswith("Total matching rows:") or tool_result.startswith(
             "No matching records found."
         ):
-            return {"messages": [AIMessage(content=tool_result)]}
+            # main.py already streamed this text via the on_tool_end event.
+            # Returning it again inside an AIMessage would cause on_chat_model_stream
+            # to send it a second time (duplicate output). Return empty so the
+            # graph ends cleanly without re-emitting the cutoff table.
+            return {"messages": [AIMessage(content="")]}
 
     # Always ensure system message is first
     if not messages or not isinstance(messages[0], SystemMessage):

@@ -69,12 +69,17 @@ class HistoryMessage(BaseModel):
 class Query(BaseModel):
     message: str
     history: Optional[List[HistoryMessage]] = []
+    # When True, the user message is prefixed with a "think step by step" instruction.
+    think_mode: Optional[bool] = False
 
 
 # Keep requests below the LLM provider's TPM limit. The browser holds the full
 # transcript; the agent needs only recent conversational context.
 MAX_HISTORY_MESSAGES = 4
-MAX_HISTORY_CONTENT_CHARS = 300
+# 1200 chars keeps roughly the last ~15 cutoff rows of a prior agent answer,
+# which is enough for follow-up questions like "show me ECE options instead".
+# We trim from the END so the most recent content is preserved.
+MAX_HISTORY_CONTENT_CHARS = 1200
 
 
 def general_college_query(message: str) -> Optional[str]:
@@ -116,17 +121,23 @@ async def chat(query: Query):
     messages = []
 
     for msg in (query.history or [])[-MAX_HISTORY_MESSAGES:]:
+        # Trim from the END so the most recent content is kept (not the first N chars).
         content = (msg.content or "")[-MAX_HISTORY_CONTENT_CHARS:]
         if msg.role == "user":
             messages.append(HumanMessage(content=content))
         elif msg.role == "agent":
             messages.append(AIMessage(content=content))
 
-    messages.append(HumanMessage(content=query.message))
+    # Fix #2: when Think mode is enabled, ask the model to reason step-by-step.
+    user_text = query.message
+    if query.think_mode:
+        user_text = "[Think step by step before answering] " + user_text
+
+    messages.append(HumanMessage(content=user_text))
 
     async def event_generator():
         try:
-            logger.info("chat_start message_len=%s", len(query.message or ""))
+            logger.info("chat_start message_len=%s think=%s", len(query.message or ""), query.think_mode)
 
             async for event in agent_graph.astream_events(
                 {"messages": messages}, version="v2"
@@ -143,7 +154,7 @@ async def chat(query: Query):
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "unknown_tool")
                     logger.info("tool_start name=%s", tool_name)
-                    yield f"data: {json.dumps({'type': 'status', 'content': f'Searching JoSAA cutoffs...'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'status', 'content': 'Searching JoSAA cutoffs...'})}\n\n"
 
                 elif kind == "on_tool_end":
                     tool_name = event.get("name", "unknown_tool")
