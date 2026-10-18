@@ -1,16 +1,17 @@
 # 🎓 AI Admission Agent
+
 **JEE Main / JoSAA counselling assistant** powered by real opening–closing rank data and an LLM tool-calling agent.
 
-Ask about ranks, colleges, branches, and build a **JoSAA-style preference list** — grounded in historical cutoffs, not invented numbers.
+Ask about ranks, colleges and branches, and build a **JoSAA-style preference list**, grounded in historical cutoffs rather than invented numbers.
 
 🌐 **Live:** [ai-admission-agent.vercel.app](https://ai-admission-agent.vercel.app)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-green)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-teal)
-![React](https://img.shields.io/badge/React-18%2B-blue)
+![React](https://img.shields.io/badge/React-Frontend-blue)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple)
+![LangChain](https://img.shields.io/badge/LangChain-Groq%20%2B%20Tools-darkgreen)
 ![Groq](https://img.shields.io/badge/LLM-Groq-orange)
-![Firebase](https://img.shields.io/badge/Auth-Firebase-yellow)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 ---
@@ -25,7 +26,6 @@ Ask about ranks, colleges, branches, and build a **JoSAA-style preference list**
 - [Configuration](#️-configuration)
 - [Agent Tools](#-agent-tools)
 - [Deployment](#-deployment)
-- [Performance & Metrics](#-performance--metrics)
 - [Important Disclaimers](#-important-disclaimers)
 - [Troubleshooting](#-troubleshooting)
 
@@ -34,30 +34,29 @@ Ask about ranks, colleges, branches, and build a **JoSAA-style preference list**
 ## ✨ Features
 
 ### 🔍 Cutoff Search
-- **JoSAA opening & closing ranks** for NITs, IIITs, IITs, GFTIs (2024–2026 data)
-- Filter by institute, branch, year, round, category, quota, gender quota
-- Rank-based queries: *"What can I get with rank 25,000?"*
-- Multi-criteria filtering with Pandas for sub-100ms response times
+- **JoSAA opening & closing ranks** for IITs, NITs, IIITs and GFTIs
+- Filter by institute (aliases like `IITB`, `NIT Trichy` are understood), institute type, branch, year, round, category, quota and gender
+- Rank-based queries such as *"What can I get with rank 25,000?"*
+- Each result in a rank search is tagged **Close match**, **Realistic option** or **Safer option** relative to your rank
+- Fast in-memory filtering with Pandas (the CSV is loaded once at startup)
 
 ### 📋 Choice List Builder
-- Build a **JoSAA-style preference order** from rank + course priorities (e.g. CSE → ECE → IT)
-- Two quota modes: **All-India** vs **Home-State**
-- Two ordering strategies: **Stronger-first** (pursue stretch goals) vs **Safer-first** (conservative)
-- Defaults: All-India + Stronger-first (configurable per user preference)
-- Generates ranked choice lists ready to upload to JoSAA portal
+- Build a **JoSAA-style preference order** from your rank and an ordered list of courses (e.g. CSE → ECE → IT)
+- Two quota modes: **All-India** (`all_india`) and **Home-State first** (`hs_first`)
+- Two ordering strategies: **Stronger-first** (`stronger_first`) and **Safer-first** (`safer_first`)
+- Defaults: All-India + Stronger-first
+- Uses recent data only (2024–2026) and labels each choice with a band
 
-### 💬 Chat Experience
-- **Streaming answers** via Server-Sent Events (SSE) for real-time response
-- **Google Sign-In** + persistent chat history (Firebase Realtime DB)
-- Guest mode: fresh chat session per visit (no account required)
-- **Stop generation** button while LLM is streaming
-- Conversation context retained within session
+### 🧭 Guided Conversation
+- For "what can I get?" style questions, the agent asks only for the details still missing: **rank, branch preference and location preference**
+- Percentile → rank helper when you give a percentile instead of a rank
+- Conversation context is kept within a chat session
 
 ### 📊 Data-Backed Answers
-- Pandas CSV search over historical JoSAA cutoff data
-- **LangGraph agentic loop** ensures LLM uses tools, doesn't hallucinate numbers
-- Optional percentile → rank approximation helper (heuristic-based)
-- Fallback graceful error messages if data is unavailable
+- Every rank and cutoff comes from a tool call over the JoSAA CSV, never from the model's memory
+- **LangGraph agent loop** forces a tool round-trip for cutoff data
+- For cutoff searches, the verified tool output is returned directly instead of being re-written by the LLM, which avoids altered numbers and truncated answers
+- Streaming responses in the chat UI
 
 ---
 
@@ -66,7 +65,7 @@ Ask about ranks, colleges, branches, and build a **JoSAA-style preference list**
 ```text
 Which NIT can I get with rank 25,000?
 
-Show all CSE openings and closings for NIT Trichy, 2024–2025.
+Show all CSE openings and closings for NIT Trichy.
 
 Which IIIT can I get with rank 51,000? Category: OPEN, Gender-Neutral, All-India quota.
 
@@ -77,8 +76,6 @@ Build my JoSAA choice list.
 I have 98.5 percentile. What's my approximate rank?
 
 Show GFTIs available for rank 80,000, Gender-Neutral, OPEN category.
-
-What are the trends in CSE cutoffs (2024 vs 2025) for top 5 NITs?
 ```
 
 ---
@@ -87,30 +84,28 @@ What are the trends in CSE cutoffs (2024 vs 2025) for top 5 NITs?
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                      React UI (Frontend)                        │
+│                      React UI (frontend/)                       │
 │                  ai-admission-agent.vercel.app                  │
-│  - Chat interface + streaming SSE consumer                      │
-│  - Google Sign-In (Firebase Auth)                               │
-│  - Chat history (cached in UI, synced via API)                  │
-│  - Choice list builder form + download                          │
+│  - Chat interface with streamed responses                       │
 └────────────────────────┬────────────────────────────────────────┘
-                         │
-            POST /api/chat (body: { message, sessionId })
-            GET /api/history (retrieve past messages)
-                         │
+                         │  chat request
 ┌────────────────────────▼────────────────────────────────────────┐
-│               FastAPI Backend (main.py)                         │
-│           Deployed on Render / Railway / GCP Cloud Run          │
-│  - SSE streaming endpoint                                       │
-│  - Session management + Firebase auth verification             │
-│  - Request validation & rate limiting                           │
+│                 FastAPI Backend (main.py)                       │
+│  - Receives the chat request                                    │
+│  - Streams the agent's output back to the UI                    │
 └────────────────────────┬────────────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────────────┐
-│          LangGraph Agent (agent.py + llm_chain.py)              │
-│  - Agentic loop with tool-calling                               │
-│  - Groq LLM (fast, cost-effective)                              │
-│  - Streaming token output to frontend                           │
+│                  LangGraph Agent (agent.py)                     │
+│                                                                 │
+│   ┌──────────┐  tool calls?   ┌───────────────────┐             │
+│   │  agent   │───── yes ─────▶│  tools (ToolNode) │             │
+│   │ (ChatGroq│◀───────────────│                   │             │
+│   │ + tools) │                └───────────────────┘             │
+│   └────┬─────┘                                                  │
+│        │ no tool calls                                          │
+│        ▼                                                        │
+│       END                                                       │
 └────────────────────────┬────────────────────────────────────────┘
                          │
           ┌──────────────┼──────────────┐
@@ -118,83 +113,60 @@ What are the trends in CSE cutoffs (2024 vs 2025) for top 5 NITs?
     ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
     │search_josaa_ │ │build_choice_ │ │percentile_to_│
     │cutoffs       │ │list          │ │rank          │
-    │(Pandas +CSV) │ │(Heuristic)   │ │(Approximation│
-    └──────┬───────┘ └──────┬───────┘ └──────┬───────┘
-           │                │                │
-           └────────────────┼────────────────┘
-                            │
-                ┌───────────▼────────────┐
-                │  josaa_cutoffs.csv     │
-                │  (2024–2026 data)      │
-                │  17k+ rows, 12 columns │
-                └────────────────────────┘
+    │(Pandas)      │ │(Pandas)      │ │(heuristic)   │
+    └──────┬───────┘ └──────┬───────┘ └──────────────┘
+           │                │
+           └────────┬───────┘
+                    ▼
+          ┌───────────────────┐
+          │  JoSAA cutoff CSV │
+          │  (loaded once)    │
+          └───────────────────┘
 ```
 
-**Data Flow:**
-1. User types query in React UI
-2. Frontend sends SSE request to FastAPI `/chat` endpoint
-3. Backend routes to LangGraph agent
-4. Agent parses query, decides which tool(s) to call
-5. Tools (search_josaa_cutoffs, build_choice_list, etc.) execute in parallel if possible
-6. LLM processes tool results and streams natural language response back to frontend
-7. Frontend displays streaming text + optionally renders structured data (choice list)
+**How a request flows**
+
+1. The user types a question in the React UI.
+2. The FastAPI backend passes it to the LangGraph agent.
+3. The `agent` node calls the Groq LLM (via LangChain's `ChatGroq`) with the three tools bound to it.
+4. If the model requests a tool, the graph routes to the `tools` node, runs it, and returns to the `agent` node.
+5. If the tool result is a cutoff table (or a "no matching records" message), the agent node ends the run without asking the LLM to repeat it, and the text is streamed to the UI as it is.
+6. Otherwise the LLM writes the final answer, which is streamed to the UI.
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology | Why |
-|-------|-----------|-----|
-| **Frontend** | React 18 + TypeScript | Type-safe, fast UI; SSE consumer for streaming |
-| **Styling** | Tailwind CSS | Rapid prototyping, responsive design |
-| **Backend** | FastAPI + Uvicorn | Async support, SSE streaming, automatic OpenAPI docs |
-| **Agent** | LangGraph | Structured agentic loop, tool-calling, state management |
-| **LLM** | Groq (free tier) | 2–3× faster than OpenAI, good quality, cost-effective |
-| **Data** | Pandas + CSV | Sub-100ms filtering over 17k rows, no DB overhead |
-| **Auth** | Firebase Auth + Realtime DB | Google Sign-In, persistent chat history, free tier |
-| **Deployment** | Vercel (frontend) + Render/Railway (backend) | One-click deployment, auto-scaling, CORS-friendly |
+| Layer | Technology | Role |
+|-------|-----------|------|
+| **Frontend** | React (`frontend/`), hosted on Vercel | Chat UI |
+| **Backend** | FastAPI + Uvicorn | API and response streaming |
+| **Agent orchestration** | **LangGraph** (`StateGraph`, `ToolNode`, conditional edges) | The agent ↔ tools loop |
+| **LLM + tools layer** | **LangChain** (`langchain-groq`, `langchain-core`) | `ChatGroq`, `bind_tools`, `@tool`, message classes |
+| **LLM provider** | Groq (default model `openai/gpt-oss-20b`) | Fast inference; model is configurable |
+| **Data** | Pandas + CSV | Cutoff search and choice-list generation |
+| **Data scripts** | `requests`, `beautifulsoup4` | Building and cleaning the dataset |
+
+> The project uses LangGraph for the agent loop and LangChain's integration packages for the model and tools. It does not use LangChain's older chain or `AgentExecutor` APIs.
 
 ---
 
 ## 📁 Project Structure
 
-```
-ai-admission-agent/
-│
-├── frontend/                       # React app (deployed to Vercel)
-│   ├── public/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── ChatWindow.tsx      # SSE consumer + message display
-│   │   │   ├── ChoiceListBuilder.tsx
-│   │   │   ├── HistorySidebar.tsx
-│   │   │   └── AuthProvider.tsx
-│   │   ├── pages/
-│   │   │   ├── index.tsx           # Main chat page
-│   │   │   └── api/auth.ts         # Firebase config
-│   │   ├── styles/
-│   │   └── App.tsx
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── vercel.json
-│
-├── backend/                        # FastAPI (deployed to Render/Railway)
-│   ├── main.py                     # Entry point, SSE endpoint, FastAPI app
-│   ├── agent.py                    # LangGraph agent definition
-│   ├── llm_chain.py                # Groq LLM initialization + streaming
-│   ├── tools.py                    # search_josaa_cutoffs, build_choice_list, etc.
-│   ├── data/
-│   │   └── josaa_cutoffs.csv       # JoSAA historical data (2024–2026)
-│   ├── config.py                   # Env vars, Firebase config
-│   ├── firebase_utils.py           # Chat history read/write
-│   ├── requirements.txt            # Python dependencies
-│   ├── .env.example
-│   └── Procfile                    # Render/Railway config
-│
+```text
+AI-Admission-agent/
+├── frontend/                 # React app (deployed to Vercel)
+├── main.py                   # FastAPI app: chat endpoint and response streaming
+├── agent.py                  # LangGraph agent, tools, aliases, system prompt, data loading
+├── build_josaa_dataset.py    # Builds the cutoff dataset
+├── clean_josaa.py            # Cleans raw JoSAA data
+├── add_2025_2026_data.py     # Adds 2025–2026 data to the dataset
+├── josaa_cutoffs.csv         # JoSAA cutoff data
+├── jeesa_cutoffs.csv         # Additional cutoff data
+├── requirements.txt          # Python dependencies
+├── setup.txt                 # Setup notes
 ├── .gitignore
-├── README.md                       # This file
-└── LICENSE                         # MIT
-
+└── README.md
 ```
 
 ---
@@ -203,303 +175,148 @@ ai-admission-agent/
 
 ### Prerequisites
 - Python 3.10+
-- Node.js 16+
-- Groq API key (free: [console.groq.com](https://console.groq.com))
-- Firebase project (free tier: [console.firebase.google.com](https://console.firebase.google.com))
+- Node.js (for the frontend)
+- A Groq API key (free tier: [console.groq.com](https://console.groq.com))
 
-### Backend Setup
+### Backend
 
-1. **Clone & enter backend directory:**
+1. **Clone the repo**
    ```bash
-   git clone https://github.com/yourusername/ai-admission-agent.git
-   cd ai-admission-agent/backend
+   git clone https://github.com/Dattasivasai/AI-Admission-agent.git
+   cd AI-Admission-agent
    ```
 
-2. **Create virtual environment:**
+2. **Create a virtual environment**
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. **Install dependencies:**
+3. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Configure environment:**
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env`:
-   ```
+4. **Create a `.env` file** next to `agent.py`
+   ```env
    GROQ_API_KEY=gsk_your_key_here
-   FIREBASE_PROJECT_ID=your-firebase-project
-   FIREBASE_PRIVATE_KEY=...
-   FIREBASE_CLIENT_EMAIL=...
-   ALLOWED_ORIGINS=http://localhost:3000,https://ai-admission-agent.vercel.app
+   # Optional: override the default model
+   # GROQ_MODEL=openai/gpt-oss-20b
    ```
 
-5. **Run backend:**
+5. **Check the data path.** `agent.py` loads the CSV named by `DATA_PATH` at startup. Make sure it points to a file you actually have (for example `josaa_cutoffs.csv`).
+
+6. **Run the backend**
    ```bash
    uvicorn main:app --reload --host 0.0.0.0 --port 8000
    ```
-   Backend should be live at `http://localhost:8000`
+   On startup you should see a line like `Loaded N JoSAA records from <file> (<first year>-<last year>)`.
 
-### Frontend Setup
+### Frontend
 
-1. **Enter frontend directory:**
-   ```bash
-   cd ../frontend
-   ```
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Configure Firebase:**
-   Create `src/config/firebase.ts`:
-   ```typescript
-   import { initializeApp } from "firebase/app";
-   import { getAuth } from "firebase/auth";
-   import { getDatabase } from "firebase/database";
-
-   const firebaseConfig = {
-     apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-     projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-     databaseURL: process.env.REACT_APP_FIREBASE_DATABASE_URL,
-     // ... other config
-   };
-
-   const app = initializeApp(firebaseConfig);
-   export const auth = getAuth(app);
-   export const db = getDatabase(app);
-   ```
-
-4. **Create `.env.local`:**
-   ```
-   REACT_APP_FIREBASE_API_KEY=...
-   REACT_APP_FIREBASE_PROJECT_ID=...
-   REACT_APP_FIREBASE_DATABASE_URL=...
-   REACT_APP_API_BASE_URL=http://localhost:8000
-   ```
-
-5. **Run frontend:**
-   ```bash
-   npm run dev
-   ```
-   Frontend should be live at `http://localhost:3000`
+Point the frontend at your backend URL (see the API base URL setting in `frontend/`).
 
 ---
 
 ## ⚙️ Configuration
 
-### Backend Environment Variables
+### Environment variables (backend)
 
 | Variable | Example | Purpose |
 |----------|---------|---------|
-| `GROQ_API_KEY` | `gsk_...` | Groq API authentication |
-| `FIREBASE_PROJECT_ID` | `my-project-123` | Firebase project ID |
-| `FIREBASE_PRIVATE_KEY` | `-----BEGIN PRIVATE KEY-----...` | Firebase service account key |
-| `FIREBASE_CLIENT_EMAIL` | `firebase-adminsdk-...@...iam.gserviceaccount.com` | Firebase service account email |
-| `ALLOWED_ORIGINS` | `http://localhost:3000,https://example.com` | CORS whitelist |
-| `LOG_LEVEL` | `INFO` | Python logging level |
-| `MAX_TOKENS` | `2048` | Max tokens per LLM response |
+| `GROQ_API_KEY` | `gsk_...` | Groq API authentication (`API_key` is accepted as a fallback name) |
+| `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model to use (this is the default) |
 
-### Frontend Environment Variables
+### Settings in code (`agent.py`)
 
-| Variable | Example | Purpose |
-|----------|---------|---------|
-| `REACT_APP_FIREBASE_API_KEY` | `AIzaSyD...` | Firebase public API key |
-| `REACT_APP_FIREBASE_PROJECT_ID` | `my-project-123` | Firebase project ID |
-| `REACT_APP_FIREBASE_DATABASE_URL` | `https://my-project-123.firebaseio.com` | Realtime DB URL |
-| `REACT_APP_API_BASE_URL` | `http://localhost:8000` | Backend API endpoint |
+| Setting | Value | Notes |
+|---------|-------|-------|
+| `DATA_PATH` | `josaa_cutoffs_2026_round5.csv` | CSV loaded once at startup; change it to match your data file |
+| Temperature | `0.1` | Low, to keep answers consistent |
+| `max_tokens` | `800` | Keeps responses inside Groq's request/token limits |
 
 ---
 
 ## 🔧 Agent Tools
 
-The LangGraph agent has access to the following tools. The LLM decides which to call based on the user's query.
+The LangGraph agent has three tools, defined with LangChain's `@tool`. The LLM decides which to call. **All tools return formatted plain text**, not JSON.
 
 ### 1. `search_josaa_cutoffs`
-**Purpose:** Find JoSAA opening/closing ranks for specific institutes, branches, years.
+Find JoSAA opening/closing ranks for institutes, branches, categories and rank ranges.
 
-**Parameters:**
-```python
-{
-  "institute": str,           # e.g., "NIT Trichy", "IIIT Delhi"
-  "branch": str,              # e.g., "CSE", "ECE", "Mechanical"
-  "year": int,                # e.g., 2024, 2025
-  "round": int,               # 1, 2, 3, etc.
-  "category": str,            # "OPEN", "OBC-NCL", "SC", "ST"
-  "quota": str,               # "All India", "Home State"
-  "gender_quota": str,        # "Neutral", "Female", (optional)
-}
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `institute` | str | Institute name or alias, e.g. `"NIT Trichy"`, `"IITB"` |
+| `institute_type` | str | One of `IIT`, `NIT`, `IIIT`, `GFTI` |
+| `program` | str | Branch or alias, e.g. `"CSE"`, `"ECE"`, `"Mechanical"` |
+| `year` | int | e.g. `2025` |
+| `round` | int | Counselling round |
+| `category` | str | Seat type, e.g. `OPEN`, `EWS`, `OBC-NCL`, `SC`, `ST` |
+| `quota` | str | e.g. `OS` (other state / all-India), `HS` (home state), `AI` |
+| `gender` | str | e.g. `Gender-Neutral`, `Female` |
+| `min_closing_rank` | int | Set to the student's rank for "what can I get with rank X?" |
+| `max_closing_rank` | int | Upper bound on closing rank (defaults to 3× the rank in rank searches) |
+| `limit` | int | Rows to return (default 100; rank searches use 25) |
+
+**Defaults the tool applies**
+- Rank search with no category → `OPEN`; no gender → `Gender-Neutral`
+- Rank search for NITs with no quota → `OS` (All-India)
+- Institute + branch with no year/round → latest year, final available round, all quotas/categories/genders
+
+**Output**
+```text
+Total matching rows: <N>. Rows displayed now: <M>.
+1. <year> R<round> | <Institute> | <Programme> | <Quota> | <Seat type> | <Gender> | OR <opening> - CR <closing> [<Fit label>]
+...
 ```
-
-**Returns:**
-```python
-{
-  "opening_rank": int,
-  "closing_rank": int,
-  "seats": int,
-  "year": int,
-  "round": int,
-}
-```
-
-**Example Query:** *"Which NITs have CSE with closing rank below 30,000 in 2024?"*
+Fit labels (only in rank searches): **Close match** (closing rank within about 5% of your rank, minimum 500), **Realistic option** (within 25%), **Safer option** (further above). The tool ends with a summary of how many of each were shown.
 
 ### 2. `build_choice_list`
-**Purpose:** Generate a ranked preference order for JoSAA based on rank, course preferences, and strategy.
+Generate a JoSAA-style preference order.
 
-**Parameters:**
-```python
-{
-  "rank": int,                         # e.g., 25000
-  "category": str,                     # "OPEN", "OBC-NCL", "SC", "ST"
-  "gender": str,                       # "Male", "Female", "Other"
-  "preferred_courses": list[str],      # ["CSE", "ECE", "IT"]
-  "quota": str,                        # "All India", "Home State"
-  "strategy": str,                     # "stronger-first" (default) or "safer-first"
-  "limit": int,                        # Max number of choices (default: 20)
-}
-```
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `rank` | int | All India Rank (required) |
+| `category` | str | `OPEN`, `OBC-NCL`, `EWS`, `SC`, `ST`, … |
+| `gender` | str | `Male` / `Gender-Neutral` are treated as Gender-Neutral; `Female` for female-only seats |
+| `courses` | str | Ordered, comma-separated, e.g. `"CSE, ECE, IT"` |
+| `quota_mode` | str | `all_india` (default) or `hs_first` |
+| `order_style` | str | `stronger_first` (default) or `safer_first` |
+| `max_choices` | int | Default 50, capped at 100 |
 
-**Returns:**
-```python
-{
-  "choices": [
-    {
-      "rank": 1,
-      "institute": "NIT Trichy",
-      "branch": "CSE",
-      "quota": "All India",
-      "category": "OPEN",
-      "expected_closing": 28000,
-      "confidence": "High"
-    },
-    ...
-  ],
-  "strategy_used": "stronger-first",
-  "total_choices": 15,
-}
-```
-
-**Example Query:** *"Build my choice list. Rank: 25,000. Courses: CSE, ECE. Stronger-first."*
+Uses 2024–2026 data, excludes PwD seats, and keeps programmes whose recent closing rank is at or above your rank. Each row is shown as `Choice No | Institute | Academic Program | Quota | Recent CR | Band`. Bands: **Safe** (closing rank ≥ 1.15× your rank) or **Moderate**.
 
 ### 3. `percentile_to_rank`
-**Purpose:** Convert JEE Main percentile to approximate rank (heuristic).
+Convert a JEE Main percentile to a rough All India Rank using a simple piecewise-linear heuristic.
 
-**Parameters:**
-```python
-{
-  "percentile": float,  # e.g., 98.5
-}
-```
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `percentile` | float | e.g. `98.5` |
 
-**Returns:**
-```python
-{
-  "percentile": 98.5,
-  "approximate_rank": 22000,
-  "confidence": "Medium",
-  "note": "Approximation based on historical trend. Actual rank may vary."
-}
-```
-
-**Example Query:** *"I scored 98.5 percentile. What's my rank?"*
+Example: `98.5` → `Approximate Rank ≈ 18,000`. This is a rough estimate only, and the agent is instructed not to use it when you give a rank directly.
 
 ---
 
 ## 🌐 Deployment
 
-### Frontend (Vercel)
+**Frontend:** deployed on Vercel from the `frontend/` directory. Set the backend API URL as an environment variable in your Vercel project.
 
-1. **Push repo to GitHub**
-2. **Connect Vercel:**
-   - Go to [vercel.com](https://vercel.com)
-   - Import your repository
-   - Set environment variables (from `.env.local`)
-   - Deploy
+**Backend:** runs on any host that can run Uvicorn:
 
-3. **Vercel Configuration** (`vercel.json`):
-   ```json
-   {
-     "buildCommand": "npm run build",
-     "outputDirectory": "build",
-     "env": {
-       "REACT_APP_API_BASE_URL": "@api_base_url"
-     }
-   }
-   ```
-
-### Backend (Render / Railway)
-
-#### Option A: Render
-1. Push backend to GitHub (or subdirectory)
-2. Go to [render.com](https://render.com)
-3. Create new Web Service → Connect GitHub repo
-4. Build command: `pip install -r requirements.txt`
-5. Start command: `uvicorn main:app --host 0.0.0.0 --port 8000`
-6. Add environment variables (from `.env`)
-7. Deploy
-
-#### Option B: Railway
-1. Go to [railway.app](https://railway.app)
-2. New Project → GitHub repo
-3. Add environment variables
-4. Railway auto-detects Python / Procfile
-5. Deploy
-
-#### Option C: Docker
-```dockerfile
-FROM python:3.10-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-Build & deploy:
 ```bash
-docker build -t ai-admission-agent .
-docker run -p 8000:8000 --env-file .env ai-admission-agent
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-### SSL/HTTPS
-Both Vercel and Render provide free SSL certificates automatically. Ensure your backend CORS header includes the deployed frontend URL.
-
----
-
-## 📊 Performance & Metrics
-
-### Latency
-- **Tool execution:** < 50ms (Pandas CSV search)
-- **LLM token generation:** ~1–2 tokens/second (Groq)
-- **End-to-end (query → first token):** ~500ms–1s
-
-### Scalability
-- **Concurrent connections:** Firebase Realtime DB free tier supports ~100 simultaneous connections
-- **Request rate:** FastAPI + Uvicorn: ~1000 req/s (single instance)
-- **Data size:** ~17k rows × 12 columns; loaded entirely in-memory (~5MB)
-
-### Cost (Monthly Estimate)
-- **Groq API:** Free tier (fair-use), < $50/month typical usage
-- **Firebase:** Free tier (5GB storage, 100 simultaneous connections)
-- **Vercel:** Free tier (for frontend)
-- **Render/Railway:** ~$5–10/month for 0.5 vCPU backend
-- **Total:** ~$15–20/month all-in
-
-### Test Coverage
-Currently **manual testing**. Roadmap includes:
-- Unit tests for tools (pytest)
-- Integration tests for LangGraph agent
-- E2E tests for API endpoints (FastAPI TestClient)
+- Set `GROQ_API_KEY` (and optionally `GROQ_MODEL`) as environment variables on the host.
+- Make sure the dataset CSV that `DATA_PATH` points to is deployed with the code.
+- Allow your frontend's origin in the backend's CORS settings.
 
 ---
 
@@ -507,73 +324,57 @@ Currently **manual testing**. Roadmap includes:
 
 ### Data Accuracy
 - This tool is **not official** and not endorsed by NTA or JoSAA.
-- **Cutoff data is historical.** Current year opening/closing ranks may differ based on:
+- **Cutoff data is historical.** Current-year opening/closing ranks may differ based on:
   - Number of test-takers
   - Merit distribution across categories/quotas
-  - Unexpected counselling dropouts or upgrades
-- **Always verify** with official JoSAA portal and admit cards before making counselling decisions.
+  - Counselling dropouts or upgrades
+- **Always verify** with the official JoSAA portal before making counselling decisions.
 
 ### Tool Output Limitations
-- **Rank approximation from percentile** is a heuristic. Actual rank may vary by ±5–10%.
-- **Choice list suggestions** are based on historical trends, not guaranteed outcomes.
-- **The tool does not account for:**
-  - Spot rounds or special counselling phases
-  - Supernumerary seats or reserved categories
-  - Last-minute college closures or mergers
+- The **percentile → rank** conversion is a rough heuristic.
+- **Fit labels, bands and choice lists** compare your rank against past closing ranks. They are not a guarantee of admission.
+- The tools do not account for spot rounds or special counselling phases, supernumerary seats, or last-minute college closures or mergers.
 
 ### Recommendations
-1. Use this tool **as a reference and learning aid**, not the sole decision factor.
-2. Cross-check all data on [josaa.nic.in](https://josaa.nic.in) or your state's counselling portal.
+1. Use this tool as a **reference and learning aid**, not the sole decision factor.
+2. Cross-check all data on [josaa.nic.in](https://josaa.nic.in).
 3. Consult college prospectuses and mentor guidance.
-4. Contact colleges directly if clarification is needed.
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Backend Issues
+### Backend
 
-**"GROQ_API_KEY not found"**
-- Ensure `.env` is in the `backend/` directory, not root.
-- Verify the key is valid at [console.groq.com](https://console.groq.com).
+**`GROQ_API_KEY` not found / 401 errors**
+- Put `.env` in the same folder as `agent.py`.
+- Check the key at [console.groq.com](https://console.groq.com).
 
-**"Firebase initialization failed"**
-- Download your Firebase service account JSON from Firebase Console.
-- Ensure all credentials are in `.env` (not in code).
-- Test with: `python -c "from config import firebase_app; print(firebase_app)"`
+**Model not found / decommissioned**
+- Groq retires models over time. Set `GROQ_MODEL` in `.env` to a currently available model.
 
-**"SSE connection drops after 30 seconds"**
-- Check backend logs for exceptions.
-- Increase the `heartbeat_interval` in `main.py` (default: 15s).
-- Verify frontend is sending `Accept: text/event-stream` header.
+**Rate-limit or token-limit errors from Groq**
+- The system prompt is kept short and `max_tokens` is 800 to fit within the free-tier limits. Lower the `limit` used in searches or wait and retry.
 
-### Frontend Issues
+**`FileNotFoundError` for the CSV at startup**
+- `DATA_PATH` in `agent.py` must match a file in the project folder.
 
-**"API request blocked (CORS)"**
-- Ensure backend CORS includes your frontend URL in `ALLOWED_ORIGINS`.
-- Test backend CORS: `curl -H "Origin: http://localhost:3000" http://localhost:8000/docs`
+### Frontend
 
-**"Messages not streaming in real-time"**
-- Verify `EventSource` is instantiated with `withCredentials: true` if using cookies.
-- Check browser console for network errors.
-- Ensure backend is reachable (test with simple GET request).
+**API request blocked (CORS)**
+- Add your frontend URL to the backend's allowed origins and restart the backend.
 
-**"Firebase login fails"**
-- Verify Firebase config is correct in `src/config/firebase.ts`.
-- Check Firebase Console → Authentication → Google sign-in is enabled.
-- Test locally with `npm run dev` first.
+**Messages not appearing**
+- Check the browser console and confirm the frontend's backend URL setting is correct and the backend is reachable.
 
-### Data Issues
+### Data
 
-**"No results for [institute/branch]"**
-- Check for typos (e.g., "IITB" vs "IIT Bombay").
-- Ensure the branch code matches CSV (e.g., "CSE", not "CS").
-- Verify year is in the dataset (currently 2024–2026).
+**"No matching records found"**
+- The message lists the filters used. Loosen them (remove year, round, quota or category) and try again.
+- Institute and branch aliases such as `IITB`, `NIT Trichy`, `CSE` and `CS` are supported. Other spellings may not match.
 
-**"LLM returns hallucinated numbers"**
-- This indicates the agent skipped tool-calling. Check agent logs.
-- Ensure `tools` are properly bound to the LLM chain in `agent.py`.
-- Test agent in isolation: `python -c "from agent import run_agent; run_agent('Your query')"`
+**LLM returns numbers that look wrong**
+- Numbers should only come from tool output. Check that tools are bound with `llm.bind_tools(tools)` in `agent.py` and that the system prompt is intact.
 
 ---
 
@@ -583,18 +384,17 @@ Currently **manual testing**. Roadmap includes:
 - [ ] Predictive rank estimator (ML model trained on historical trends)
 - [ ] Preference list export as PDF/JSON
 - [ ] Multi-language support (Hindi, Telugu, Tamil)
-- [ ] Real-time cutoff updates (webhook from JoSAA)
-- [ ] Comprehensive test suite (pytest + Playwright E2E)
-- [ ] Mobile app (React Native)
+- [ ] Automated cutoff updates
+- [ ] Test suite (pytest for the tools, integration tests for the agent, E2E for the API)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome:
 1. Fork the repo
 2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit changes: `git commit -m "Add your feature"`
+3. Commit your changes: `git commit -m "Add your feature"`
 4. Push: `git push origin feature/your-feature`
 5. Open a Pull Request
 
@@ -608,19 +408,16 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 
 ## 👤 Author
 
-**[Your Name]** — AI & Backend Engineer  
-🌐 [Portfolio](https://yourportfolio.com)  
-🔗 [LinkedIn](https://linkedin.com/in/yourprofile)  
-🐙 [GitHub](https://github.com/yourusername)
+**[Dattasivasai](https://github.com/Dattasivasai)**
 
 ---
 
 ## 🙏 Acknowledgments
 
-- [LangGraph](https://langchain-ai.github.io/langgraph/) for agentic orchestration
+- [LangGraph](https://langchain-ai.github.io/langgraph/) for agent orchestration
+- [LangChain](https://www.langchain.com/) for the Groq integration and tool abstractions
 - [Groq](https://groq.com/) for fast LLM inference
-- [Firebase](https://firebase.google.com/) for auth & real-time database
-- JoSAA for historical cutoff data
+- JoSAA for the historical cutoff data
 
 ---
 
