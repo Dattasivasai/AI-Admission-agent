@@ -8,10 +8,11 @@ Ask about ranks, colleges and branches, and build a **JoSAA-style preference lis
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-green)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-teal)
-![React](https://img.shields.io/badge/React-Frontend-blue)
+![React](https://img.shields.io/badge/React-Vite-blue)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Agent-purple)
 ![LangChain](https://img.shields.io/badge/LangChain-Groq%20%2B%20Tools-darkgreen)
 ![Groq](https://img.shields.io/badge/LLM-Groq-orange)
+![Firebase](https://img.shields.io/badge/Firebase-Frontend-yellow)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 ---
@@ -24,7 +25,9 @@ Ask about ranks, colleges and branches, and build a **JoSAA-style preference lis
 - [Project Structure](#-project-structure)
 - [Quick Start](#-quick-start)
 - [Configuration](#️-configuration)
+- [API](#-api)
 - [Agent Tools](#-agent-tools)
+- [Data](#-data)
 - [Deployment](#-deployment)
 - [Important Disclaimers](#-important-disclaimers)
 - [Troubleshooting](#-troubleshooting)
@@ -34,8 +37,8 @@ Ask about ranks, colleges and branches, and build a **JoSAA-style preference lis
 ## ✨ Features
 
 ### 🔍 Cutoff Search
-- **JoSAA opening & closing ranks** for IITs, NITs, IIITs and GFTIs
-- Filter by institute (aliases like `IITB`, `NIT Trichy` are understood), institute type, branch, year, round, category, quota and gender
+- **JoSAA opening & closing ranks** for IITs, NITs, IIITs and GFTIs (2024–2026 data)
+- Filter by institute (aliases like `IITB` and `NIT Trichy` are understood), institute type, branch, year, round, category, quota and gender
 - Rank-based queries such as *"What can I get with rank 25,000?"*
 - Each result in a rank search is tagged **Close match**, **Realistic option** or **Safer option** relative to your rank
 - Fast in-memory filtering with Pandas (the CSV is loaded once at startup)
@@ -47,16 +50,20 @@ Ask about ranks, colleges and branches, and build a **JoSAA-style preference lis
 - Defaults: All-India + Stronger-first
 - Uses recent data only (2024–2026) and labels each choice with a band
 
+### 🏫 College Overview
+- Ask *"Tell me about IIIT Kottayam"* and the backend answers straight from the dataset with the programmes offered in the latest round, without calling the LLM
+- Small spelling mistakes in college names are tolerated
+
 ### 🧭 Guided Conversation
 - For "what can I get?" style questions, the agent asks only for the details still missing: **rank, branch preference and location preference**
 - Percentile → rank helper when you give a percentile instead of a rank
-- Conversation context is kept within a chat session
+- Optional **Think mode**: the request asks the model to reason step by step before answering
 
 ### 📊 Data-Backed Answers
 - Every rank and cutoff comes from a tool call over the JoSAA CSV, never from the model's memory
 - **LangGraph agent loop** forces a tool round-trip for cutoff data
-- For cutoff searches, the verified tool output is returned directly instead of being re-written by the LLM, which avoids altered numbers and truncated answers
-- Streaming responses in the chat UI
+- For cutoff searches, the verified tool output is streamed directly instead of being re-written by the LLM, which avoids altered numbers and truncated answers
+- Responses are streamed to the UI as Server-Sent Events (SSE)
 
 ---
 
@@ -76,6 +83,8 @@ Build my JoSAA choice list.
 I have 98.5 percentile. What's my approximate rank?
 
 Show GFTIs available for rank 80,000, Gender-Neutral, OPEN category.
+
+Tell me about IIIT Kottayam.
 ```
 
 ---
@@ -84,15 +93,17 @@ Show GFTIs available for rank 80,000, Gender-Neutral, OPEN category.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                      React UI (frontend/)                       │
+│                   React UI (frontend/, Vite)                    │
 │                  ai-admission-agent.vercel.app                  │
-│  - Chat interface with streamed responses                       │
+│  - Chat interface, consumes the SSE stream                      │
+│  - Keeps the chat transcript in the browser                     │
 └────────────────────────┬────────────────────────────────────────┘
-                         │  chat request
+                         │  POST /chat  { message, history, think_mode }
 ┌────────────────────────▼────────────────────────────────────────┐
 │                 FastAPI Backend (main.py)                       │
-│  - Receives the chat request                                    │
-│  - Streams the agent's output back to the UI                    │
+│  - Stateless: uses the last few history messages sent per call  │
+│  - "Tell me about <college>" → answered from the CSV (no LLM)   │
+│  - Otherwise streams the agent's events back as SSE             │
 └────────────────────────┬────────────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────────────┐
@@ -127,11 +138,12 @@ Show GFTIs available for rank 80,000, Gender-Neutral, OPEN category.
 **How a request flows**
 
 1. The user types a question in the React UI.
-2. The FastAPI backend passes it to the LangGraph agent.
-3. The `agent` node calls the Groq LLM (via LangChain's `ChatGroq`) with the three tools bound to it.
-4. If the model requests a tool, the graph routes to the `tools` node, runs it, and returns to the `agent` node.
-5. If the tool result is a cutoff table (or a "no matching records" message), the agent node ends the run without asking the LLM to repeat it, and the text is streamed to the UI as it is.
-6. Otherwise the LLM writes the final answer, which is streamed to the UI.
+2. The UI sends `POST /chat` with the message, the recent chat history and the Think-mode flag.
+3. If the message is a general "tell me about <college>" request, the backend answers from the CSV and streams the result without using the LLM.
+4. Otherwise the LangGraph `agent` node calls the Groq LLM (via LangChain's `ChatGroq`) with the three tools bound to it.
+5. If the model requests a tool, the graph routes to the `tools` node, runs it, and returns to the `agent` node.
+6. If the tool result is a cutoff table (or a "no matching records" message), the backend streams it as it is and the agent node ends the run without asking the LLM to repeat it.
+7. Otherwise the LLM writes the final answer, which is streamed token by token.
 
 ---
 
@@ -139,13 +151,14 @@ Show GFTIs available for rank 80,000, Gender-Neutral, OPEN category.
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| **Frontend** | React (`frontend/`), hosted on Vercel | Chat UI |
-| **Backend** | FastAPI + Uvicorn | API and response streaming |
+| **Frontend** | React + Vite (`frontend/`), hosted on Vercel | Chat UI |
+| **Frontend services** | Firebase (client side) | Configured through `VITE_FIREBASE_*` variables; the backend does not use Firebase |
+| **Backend** | FastAPI + Uvicorn | API and SSE streaming |
 | **Agent orchestration** | **LangGraph** (`StateGraph`, `ToolNode`, conditional edges) | The agent ↔ tools loop |
 | **LLM + tools layer** | **LangChain** (`langchain-groq`, `langchain-core`) | `ChatGroq`, `bind_tools`, `@tool`, message classes |
 | **LLM provider** | Groq (default model `openai/gpt-oss-20b`) | Fast inference; model is configurable |
 | **Data** | Pandas + CSV | Cutoff search and choice-list generation |
-| **Data scripts** | `requests`, `beautifulsoup4` | Building and cleaning the dataset |
+| **Data scripts** | `requests`, `pandas` | Building and cleaning the dataset |
 
 > The project uses LangGraph for the agent loop and LangChain's integration packages for the model and tools. It does not use LangChain's older chain or `AgentExecutor` APIs.
 
@@ -155,16 +168,16 @@ Show GFTIs available for rank 80,000, Gender-Neutral, OPEN category.
 
 ```text
 AI-Admission-agent/
-├── frontend/                 # React app (deployed to Vercel)
-├── main.py                   # FastAPI app: chat endpoint and response streaming
+├── frontend/                 # React + Vite app (deployed to Vercel)
+├── main.py                   # FastAPI app: POST /chat, SSE streaming, CORS
 ├── agent.py                  # LangGraph agent, tools, aliases, system prompt, data loading
-├── build_josaa_dataset.py    # Builds the cutoff dataset
-├── clean_josaa.py            # Cleans raw JoSAA data
-├── add_2025_2026_data.py     # Adds 2025–2026 data to the dataset
-├── josaa_cutoffs.csv         # JoSAA cutoff data
-├── jeesa_cutoffs.csv         # Additional cutoff data
+├── build_josaa_dataset.py    # Step 1: download 2016–2024 JoSAA data → josaa_cutoffs.csv
+├── add_2025_2026_data.py     # Step 2: append 2025 and 2026 data to josaa_cutoffs.csv
+├── clean_josaa.py            # Step 3: keep 2024–2026 and clean josaa_cutoffs.csv
+├── josaa_cutoffs.csv         # Cleaned cutoff dataset produced by the scripts above
+├── jeesa_cutoffs.csv         # Extra dataset (not loaded by the backend)
 ├── requirements.txt          # Python dependencies
-├── setup.txt                 # Setup notes
+├── setup.txt                 # Short setup notes
 ├── .gitignore
 └── README.md
 ```
@@ -177,6 +190,7 @@ AI-Admission-agent/
 - Python 3.10+
 - Node.js (for the frontend)
 - A Groq API key (free tier: [console.groq.com](https://console.groq.com))
+- A Firebase project (the frontend reads its config from `VITE_FIREBASE_*` variables)
 
 ### Backend
 
@@ -189,7 +203,7 @@ AI-Admission-agent/
 2. **Create a virtual environment**
    ```bash
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   source venv/bin/activate        # Windows: .\venv\Scripts\activate
    ```
 
 3. **Install dependencies**
@@ -197,14 +211,14 @@ AI-Admission-agent/
    pip install -r requirements.txt
    ```
 
-4. **Create a `.env` file** next to `agent.py`
+4. **Create a `.env` file in the project root**
    ```env
-   GROQ_API_KEY=gsk_your_key_here
+   GROQ_API_KEY=your_groq_api_key
    # Optional: override the default model
    # GROQ_MODEL=openai/gpt-oss-20b
    ```
 
-5. **Check the data path.** `agent.py` loads the CSV named by `DATA_PATH` at startup. Make sure it points to a file you actually have (for example `josaa_cutoffs.csv`).
+5. **Check the data path.** `agent.py` loads the CSV named by `DATA_PATH` at startup. To use the dataset built by the scripts in this repo, set it to `josaa_cutoffs.csv` (see [Data](#-data)).
 
 6. **Run the backend**
    ```bash
@@ -217,29 +231,90 @@ AI-Admission-agent/
 ```bash
 cd frontend
 npm install
-npm run dev
 ```
 
-Point the frontend at your backend URL (see the API base URL setting in `frontend/`).
+Create `frontend/.env`:
+
+```env
+VITE_API_URL=http://localhost:8000
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+# plus any other Firebase keys the app uses
+```
+
+Then start the dev server and open the URL Vite prints (usually `http://localhost:5173`):
+
+```bash
+npm run dev
+```
 
 ---
 
 ## ⚙️ Configuration
 
-### Environment variables (backend)
+### Backend environment variables (`.env` in the project root)
 
 | Variable | Example | Purpose |
 |----------|---------|---------|
 | `GROQ_API_KEY` | `gsk_...` | Groq API authentication (`API_key` is accepted as a fallback name) |
 | `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model to use (this is the default) |
 
-### Settings in code (`agent.py`)
+### Frontend environment variables (`frontend/.env`)
 
-| Setting | Value | Notes |
-|---------|-------|-------|
-| `DATA_PATH` | `josaa_cutoffs_2026_round5.csv` | CSV loaded once at startup; change it to match your data file |
-| Temperature | `0.1` | Low, to keep answers consistent |
-| `max_tokens` | `800` | Keeps responses inside Groq's request/token limits |
+| Variable | Example | Purpose |
+|----------|---------|---------|
+| `VITE_API_URL` | `http://localhost:8000` | Backend base URL |
+| `VITE_FIREBASE_API_KEY` | `...` | Firebase web API key |
+| `VITE_FIREBASE_AUTH_DOMAIN` | `...` | Firebase auth domain |
+| `VITE_FIREBASE_PROJECT_ID` | `...` | Firebase project ID |
+
+### Settings in code
+
+| Setting | Value | Where | Notes |
+|---------|-------|-------|-------|
+| `DATA_PATH` | `josaa_cutoffs_2026_round5.csv` | `agent.py` | CSV loaded once at startup; change it to match your data file |
+| Temperature | `0.1` | `agent.py` | Low, to keep answers consistent |
+| `max_tokens` | `800` | `agent.py` | Keeps responses inside Groq's request/token limits |
+| `MAX_HISTORY_MESSAGES` | `4` | `main.py` | Only the last 4 history messages are sent to the agent |
+| `MAX_HISTORY_CONTENT_CHARS` | `1200` | `main.py` | Each history message is trimmed to its last 1200 characters |
+| CORS origins | `*` | `main.py` | Open to all origins; restrict this in production |
+
+---
+
+## 🔌 API
+
+Interactive docs are available at `/docs` (FastAPI default).
+
+### `GET /`
+Health check. Returns `{"message": "JEE Admission Agent Backend is running!"}`.
+
+### `POST /chat`
+Request body:
+
+```json
+{
+  "message": "Which NIT can I get with rank 25000?",
+  "history": [
+    { "role": "user",  "content": "..." },
+    { "role": "agent", "content": "..." }
+  ],
+  "think_mode": false
+}
+```
+
+- `history` is optional. The backend is stateless and only uses the most recent messages (see settings above). Roles are `user` and `agent`.
+- `think_mode` is optional. When `true`, the message is prefixed with a "think step by step" instruction.
+
+The response is a `text/event-stream`. Each event is `data: {JSON}` with one of these types:
+
+| `type` | Meaning |
+|--------|---------|
+| `token` | A chunk of answer text (`content`) |
+| `status` | A progress message, e.g. "Searching JoSAA cutoffs..." |
+| `end` | The model finished an answer |
+| `done` | The stream is over (always sent last) |
+| `error` | Something went wrong (`content` has the message) |
 
 ---
 
@@ -303,9 +378,36 @@ Example: `98.5` → `Approximate Rank ≈ 18,000`. This is a rough estimate only
 
 ---
 
+## 🗂️ Data
+
+The dataset is built in three steps. Each script reads and writes `josaa_cutoffs.csv` in the project root.
+
+| Step | Script | What it does |
+|------|--------|--------------|
+| 1 | `build_josaa_dataset.py` | Downloads the 2016–2024 JoSAA cutoff CSVs, renames columns to a common schema and writes `josaa_cutoffs.csv` |
+| 2 | `add_2025_2026_data.py` | Appends 2025 (rounds 1–6) and 2026 (rounds 1–4) data from public sources and removes duplicates |
+| 3 | `clean_josaa.py` | Keeps only 2024, 2025 and 2026, normalises whitespace, drops rows with no closing rank and saves the result |
+
+**Columns:** `year`, `round`, `type`, `institute`, `academic_program`, `quota`, `seat_type`, `gender`, `opening_rank`, `closing_rank`.
+
+**Notes**
+- Preparatory-rank suffixes such as `238P` are converted to plain numbers (`238`) when the dataset is built.
+- `agent.py` loads whichever file `DATA_PATH` points to. Set it to `josaa_cutoffs.csv` to use the dataset built by these scripts.
+- Round coverage for the latest year depends on what was available when the data was collected.
+
+**Sources**
+- 2016–2024: [PardhavMaradani/josaa-sql-interface](https://github.com/PardhavMaradani/josaa-sql-interface)
+- 2025: [three-tap-com/data-file-TT](https://github.com/three-tap-com/data-file-TT)
+- 2026: [Harith-Y/JoSAA-CSAB-Closing-Rank-Predictor](https://github.com/Harith-Y/JoSAA-CSAB-Closing-Rank-Predictor)
+
+---
+
 ## 🌐 Deployment
 
-**Frontend:** deployed on Vercel from the `frontend/` directory. Set the backend API URL as an environment variable in your Vercel project.
+**Frontend (Vercel):**
+- Set the project's root directory to `frontend`.
+- Build command `npm run build`, output directory `dist` (Vite).
+- Add `VITE_API_URL` (your deployed backend URL) and the `VITE_FIREBASE_*` variables in the Vercel project settings.
 
 **Backend:** runs on any host that can run Uvicorn:
 
@@ -315,8 +417,8 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
 - Set `GROQ_API_KEY` (and optionally `GROQ_MODEL`) as environment variables on the host.
-- Make sure the dataset CSV that `DATA_PATH` points to is deployed with the code.
-- Allow your frontend's origin in the backend's CORS settings.
+- Deploy the dataset CSV that `DATA_PATH` points to together with the code.
+- CORS currently allows all origins; restrict `allow_origins` in `main.py` to your frontend's URL for production.
 
 ---
 
@@ -328,7 +430,7 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
   - Number of test-takers
   - Merit distribution across categories/quotas
   - Counselling dropouts or upgrades
-- **Always verify** with the official JoSAA portal before making counselling decisions.
+- The data comes from third-party public sources (see [Data](#-data)). **Always verify** with the official JoSAA portal before making counselling decisions.
 
 ### Tool Output Limitations
 - The **percentile → rank** conversion is a rough heuristic.
@@ -347,25 +449,25 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 ### Backend
 
 **`GROQ_API_KEY` not found / 401 errors**
-- Put `.env` in the same folder as `agent.py`.
+- Put `.env` in the project root, next to `agent.py`.
 - Check the key at [console.groq.com](https://console.groq.com).
 
 **Model not found / decommissioned**
 - Groq retires models over time. Set `GROQ_MODEL` in `.env` to a currently available model.
 
 **Rate-limit or token-limit errors from Groq**
-- The system prompt is kept short and `max_tokens` is 800 to fit within the free-tier limits. Lower the `limit` used in searches or wait and retry.
+- The system prompt is kept short, history is trimmed and `max_tokens` is 800 to fit within free-tier limits. Wait and retry, or use a model with higher limits.
 
 **`FileNotFoundError` for the CSV at startup**
-- `DATA_PATH` in `agent.py` must match a file in the project folder.
+- `DATA_PATH` in `agent.py` must match a file in the project folder. Run the three data scripts (or use the committed `josaa_cutoffs.csv`) and set `DATA_PATH` accordingly.
 
 ### Frontend
 
 **API request blocked (CORS)**
-- Add your frontend URL to the backend's allowed origins and restart the backend.
+- CORS is open by default. If you restricted `allow_origins`, add your frontend URL and restart the backend.
 
 **Messages not appearing**
-- Check the browser console and confirm the frontend's backend URL setting is correct and the backend is reachable.
+- Check the browser console and confirm `VITE_API_URL` points to a reachable backend. Restart `npm run dev` after editing `frontend/.env`.
 
 ### Data
 
@@ -417,7 +519,8 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 - [LangGraph](https://langchain-ai.github.io/langgraph/) for agent orchestration
 - [LangChain](https://www.langchain.com/) for the Groq integration and tool abstractions
 - [Groq](https://groq.com/) for fast LLM inference
-- JoSAA for the historical cutoff data
+- [PardhavMaradani/josaa-sql-interface](https://github.com/PardhavMaradani/josaa-sql-interface), [three-tap-com/data-file-TT](https://github.com/three-tap-com/data-file-TT) and [Harith-Y/JoSAA-CSAB-Closing-Rank-Predictor](https://github.com/Harith-Y/JoSAA-CSAB-Closing-Rank-Predictor) for the public cutoff data
+- JoSAA for the original cutoff data
 
 ---
 
